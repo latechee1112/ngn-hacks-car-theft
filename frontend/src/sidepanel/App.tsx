@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import ToggleSwitch from './ToggleSwitch'
+import Icon from './Icon'
 
 async function getActiveTabId(): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -8,9 +9,8 @@ async function getActiveTabId(): Promise<number | null> {
 
 const EXTENSION_VERSION = chrome.runtime.getManifest().version
 
-function Icon({ name, className = '' }: { name: string; className?: string }) {
-  return <span className={`material-symbols-outlined ${className}`}>{name}</span>
-}
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-on-surface-variant focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 
 function App() {
   const [simplified, setSimplified] = useState(false)
@@ -128,27 +128,19 @@ function App() {
 
   return (
     <div className="relative mx-auto flex h-screen w-full max-w-[400px] flex-col overflow-hidden border-x border-outline bg-background">
-      <header className="flex w-full shrink-0 items-center justify-between border-b border-outline bg-background px-5 py-3">
+      <header className="flex w-full shrink-0 items-center justify-between border-b border-outline bg-background px-4 py-3">
         <div className="flex items-center gap-2">
-          <svg className="h-5 w-5 text-primary" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-          </svg>
-          <h1 className="text-base font-semibold tracking-tight text-on-background">Distill</h1>
+          <Icon name="funnel" className="text-on-background" />
+          <h1 className="text-title font-semibold tracking-tight text-on-background">Distill</h1>
         </div>
         <ToggleSwitch checked={true} size="md" />
       </header>
 
-      <main className="flex flex-1 flex-col gap-5 overflow-y-auto bg-background p-4">
+      <main className="flex flex-1 flex-col gap-6 overflow-y-auto bg-background p-4">
         <div className="flex items-center justify-between">
-          <div
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 ${
-              simplified
-                ? 'border-[#064e3b] bg-status-bg'
-                : 'border-outline bg-surface'
-            }`}
-          >
-            <div className={`h-1.5 w-1.5 rounded-full ${simplified ? 'bg-status-text' : 'bg-on-surface-variant'}`} />
-            <span className={`text-xs font-medium ${simplified ? 'text-status-text' : 'text-on-surface-variant'}`}>
+          <div className="inline-flex items-center gap-2 rounded-full border border-outline bg-surface px-3 py-1">
+            <div className={`h-1.5 w-1.5 rounded-full ${simplified ? 'bg-accent-text' : 'bg-on-surface-muted'}`} />
+            <span className={`text-meta font-medium ${simplified ? 'text-accent-text' : 'text-on-surface-variant'}`}>
               {simplified ? 'Local processing active' : 'Local processing idle'}
             </span>
           </div>
@@ -158,62 +150,68 @@ function App() {
           <button
             type="button"
             onClick={simplified ? restorePage : simplifyPage}
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-hover"
+            className={`flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-body font-medium text-accent-fg transition-colors hover:bg-accent-hover ${FOCUS_RING}`}
           >
-            <Icon name={simplified ? 'visibility' : 'layers'} className="text-[18px]" />
+            <Icon name={simplified ? 'restore' : 'layers'} />
             {simplified ? 'Show Original Page' : 'Simplify Current Page'}
           </button>
           <button
             type="button"
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-outline bg-surface px-4 py-2 text-sm font-medium text-on-surface transition-colors hover:bg-surface-hover"
+            className={`flex w-full items-center justify-center gap-2 rounded-md border border-outline bg-surface px-4 py-2 text-body font-medium text-on-surface transition-colors hover:bg-surface-hover ${FOCUS_RING}`}
           >
-            <Icon name="tune" className="text-[16px]" />
+            <Icon name="sliders" />
             View Settings
           </button>
         </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="text-meta text-danger-text">{error}</p>}
 
-        <div className="rounded-md border border-card-border bg-card-bg p-3">
-          <div className="mb-1 flex items-center gap-2">
-            <Icon name="person" className="text-[16px] text-on-surface-variant" />
-            <h3 className="text-sm font-medium text-on-surface">Default Profile</h3>
+        <div className="rounded-md border border-outline bg-surface p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Icon name="user" className="text-on-surface-variant" />
+            <h3 className="text-body font-medium text-on-surface">Default Profile</h3>
           </div>
-          <p className="text-xs text-on-surface-variant">Spacing: +40% • Text: 1.15x • High Contrast</p>
+          <p className="text-meta text-on-surface-variant">Spacing: +40% · Text: 1.15x · High Contrast</p>
         </div>
 
         <div>
-          <h2 className="section-header mb-2 text-xs font-semibold tracking-wide text-on-surface-variant uppercase">
+          <h2 className="mb-2 text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
             Simplification Controls
           </h2>
-          <div className="overflow-hidden rounded-md border border-card-border bg-card-bg">
-            <div className="border-b border-card-border p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <label className="text-sm font-medium text-on-surface">Intensity</label>
-                <span className="text-xs text-on-surface-variant">50%</span>
+          <div className="overflow-hidden rounded-md border border-outline bg-surface">
+            <div className="border-b border-outline p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <label className="text-body font-medium text-on-surface">Intensity</label>
+                <span className="text-meta tabular-nums text-on-surface-variant">50%</span>
               </div>
               <input type="range" min={1} max={100} defaultValue={50} />
             </div>
 
             <div className="flex flex-col">
-              <label className="flex cursor-pointer items-center justify-between border-b border-card-border p-3 transition-colors hover:bg-surface-hover">
-                <div className="flex items-center gap-2.5">
-                  <Icon name="animation" className="text-[18px] text-on-surface-variant" />
-                  <span className="text-sm text-on-surface">Reduce motion</span>
+              <label
+                className="flex cursor-pointer items-center justify-between border-b border-outline px-4 py-3 transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-on-surface-variant focus-within:ring-inset"
+              >
+                <div className="flex items-center gap-3">
+                  <Icon name="pulse" className="text-on-surface-variant" />
+                  <span className="text-body text-on-surface">Reduce motion</span>
                 </div>
                 <ToggleSwitch checked={true} />
               </label>
-              <label className="flex cursor-pointer items-center justify-between border-b border-card-border p-3 transition-colors hover:bg-surface-hover">
-                <div className="flex items-center gap-2.5">
-                  <Icon name="format_line_spacing" className="text-[18px] text-on-surface-variant" />
-                  <span className="text-sm text-on-surface">Increase spacing</span>
+              <label
+                className="flex cursor-pointer items-center justify-between border-b border-outline px-4 py-3 transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-on-surface-variant focus-within:ring-inset"
+              >
+                <div className="flex items-center gap-3">
+                  <Icon name="spacing" className="text-on-surface-variant" />
+                  <span className="text-body text-on-surface">Increase spacing</span>
                 </div>
                 <ToggleSwitch checked={true} />
               </label>
-              <label className="flex cursor-pointer items-center justify-between border-b border-card-border p-3 transition-colors hover:bg-surface-hover">
-                <div className="flex items-center gap-2.5">
-                  <Icon name="visibility" className="text-[18px] text-on-surface-variant" />
-                  <span className="text-sm text-on-surface">Progressive reveal</span>
+              <label
+                className="flex cursor-pointer items-center justify-between border-b border-outline px-4 py-3 transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-on-surface-variant focus-within:ring-inset"
+              >
+                <div className="flex items-center gap-3">
+                  <Icon name="eye" className="text-on-surface-variant" />
+                  <span className="text-body text-on-surface">Progressive reveal</span>
                 </div>
                 <ToggleSwitch
                   checked={progressiveRevealActive}
@@ -221,10 +219,12 @@ function App() {
                   onChange={toggleProgressiveReveal}
                 />
               </label>
-              <label className="flex cursor-pointer items-center justify-between p-3 transition-colors hover:bg-surface-hover">
-                <div className="flex items-center gap-2.5">
-                  <Icon name="palette" className="text-[18px] text-on-surface-variant" />
-                  <span className="text-sm text-on-surface">Reduce color variation</span>
+              <label
+                className="flex cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-on-surface-variant focus-within:ring-inset"
+              >
+                <div className="flex items-center gap-3">
+                  <Icon name="droplet" className="text-on-surface-variant" />
+                  <span className="text-body text-on-surface">Reduce color variation</span>
                 </div>
                 <ToggleSwitch
                   checked={colorReductionActive}
@@ -236,28 +236,28 @@ function App() {
           </div>
         </div>
 
-        <div className="pt-2 pb-6">
+        <div className="pb-2">
           <button
             type="button"
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-transparent px-4 py-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body text-on-surface-variant transition-colors hover:bg-surface hover:text-on-surface ${FOCUS_RING}`}
           >
-            <Icon name="visibility_off" className="text-[16px]" />
+            <Icon name="expand" />
             Show everything temporarily
           </button>
         </div>
       </main>
 
-      <footer className="flex w-full shrink-0 flex-col items-center gap-2 border-t border-outline bg-background px-4 py-3 text-xs text-on-surface-variant">
-        <div className="flex gap-3">
-          <a className="transition-colors hover:text-on-surface" href="#">
+      <footer className="flex w-full shrink-0 flex-col items-center gap-2 border-t border-outline bg-background px-4 py-4 text-meta text-on-surface-variant">
+        <div className="flex items-center gap-3">
+          <a className={`rounded-sm transition-colors hover:text-on-background ${FOCUS_RING}`} href="#">
             Privacy
           </a>
-          <span>·</span>
-          <a className="transition-colors hover:text-on-surface" href="#">
+          <span className="text-on-surface-muted">·</span>
+          <a className={`rounded-sm transition-colors hover:text-on-background ${FOCUS_RING}`} href="#">
             Feedback
           </a>
         </div>
-        <p>Distill v{EXTENSION_VERSION}</p>
+        <p className="text-on-surface-muted">Distill v{EXTENSION_VERSION}</p>
       </footer>
     </div>
   )
