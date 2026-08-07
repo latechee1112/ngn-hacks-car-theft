@@ -126,6 +126,9 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
   color: ${NEUTRAL_COLOR} !important;
 }
+html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):not(button a) {
+  text-decoration: underline !important;
+}
 #${RESTORE_BTN_ID} {
   position: fixed;
   bottom: 16px;
