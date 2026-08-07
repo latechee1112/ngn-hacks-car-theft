@@ -402,6 +402,7 @@ function goToSection(index: number): void {
   currentSectionIndex = Math.max(0, Math.min(index, sections.length - 1))
   applySectionVisibility()
   updateProgressiveControls()
+  window.scrollTo({ top: 0, behavior: 'auto' })
 }
 
 function removeProgressiveControls(): void {
