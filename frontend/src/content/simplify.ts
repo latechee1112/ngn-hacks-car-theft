@@ -7,6 +7,8 @@ const RESTORE_BTN_ID = 'focusfit-restore-button'
 const PRIMARY_CLASS = 'focusfit-primary-content'
 const DEEMPHASIZE_CLASS = 'focusfit-deemphasize'
 const UNSTICK_CLASS = 'focusfit-unstick'
+const NEUTRAL_COLOR_CLASS = 'focusfit-neutral-color'
+const NEUTRAL_COLOR = '#1a1a1a'
 
 const NOISE_SELECTOR =
   'nav, aside, footer, [role="navigation"], [role="complementary"], [role="contentinfo"], ' +
@@ -120,6 +122,10 @@ html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
 html[${SIMPLIFIED_ATTR}] .${UNSTICK_CLASS} {
   position: static !important;
 }
+html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
+html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
+  color: ${NEUTRAL_COLOR} !important;
+}
 #${RESTORE_BTN_ID} {
   position: fixed;
   bottom: 16px;
@@ -183,6 +189,30 @@ export function applySimplification(): SimplifyResult {
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
 
   return { primaryFound: !!primary, deemphasizedCount: targets.length }
+}
+
+function getPrimaryElement(): Element | null {
+  return document.querySelector(`.${PRIMARY_CLASS}`)
+}
+
+export function canReduceColorVariation(): boolean {
+  return isSimplificationActive() && !!getPrimaryElement()
+}
+
+export function isColorVariationReduced(): boolean {
+  return getPrimaryElement()?.classList.contains(NEUTRAL_COLOR_CLASS) ?? false
+}
+
+// Toggles a single neutral text/link color across the simplified primary region only.
+// Reuses the same snapshot-before-mutating + class-toggle pattern as the noise dimming
+// above, so restoreOriginalPage() undoes this along with everything else.
+export function setReduceColorVariation(enabled: boolean): boolean {
+  const primary = getPrimaryElement()
+  if (!isSimplificationActive() || !primary) return false
+
+  saveOriginal(primary)
+  primary.classList.toggle(NEUTRAL_COLOR_CLASS, enabled)
+  return true
 }
 
 export function restoreOriginalPage(): void {

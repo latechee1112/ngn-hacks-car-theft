@@ -10,6 +10,8 @@ function App() {
   const [status, setStatus] = useState<string>('')
   const [result, setResult] = useState<ExtractionResult | null>(null)
   const [simplified, setSimplified] = useState(false)
+  const [colorReductionAvailable, setColorReductionAvailable] = useState(false)
+  const [colorReductionActive, setColorReductionActive] = useState(false)
 
   async function refreshStatus() {
     try {
@@ -17,10 +19,16 @@ function App() {
       if (!tabId) return
       const response = (await chrome.tabs.sendMessage(tabId, { type: 'FOCUSFIT_STATUS' })) as {
         simplified: boolean
+        colorReductionAvailable: boolean
+        colorReductionActive: boolean
       }
       setSimplified(response.simplified)
+      setColorReductionAvailable(response.colorReductionAvailable)
+      setColorReductionActive(response.colorReductionActive)
     } catch {
       setSimplified(false)
+      setColorReductionAvailable(false)
+      setColorReductionActive(false)
     }
   }
 
@@ -75,6 +83,7 @@ function App() {
         type: 'FOCUSFIT_SIMPLIFY',
       })) as { primaryFound: boolean; deemphasizedCount: number }
       setSimplified(true)
+      setColorReductionAvailable(response.primaryFound)
       setStatus(
         response.primaryFound
           ? `Simplified. Main content detected, ${response.deemphasizedCount} clutter elements deemphasized.`
@@ -95,9 +104,31 @@ function App() {
       }
       await chrome.tabs.sendMessage(tabId, { type: 'FOCUSFIT_RESTORE' })
       setSimplified(false)
+      setColorReductionAvailable(false)
+      setColorReductionActive(false)
       setStatus('Original page restored.')
     } catch (err) {
       setStatus(`Restore failed: ${String(err)}`)
+    }
+  }
+
+  async function toggleColorReduction(enabled: boolean) {
+    try {
+      const tabId = await getActiveTabId()
+      if (!tabId) {
+        setStatus('No active tab found')
+        return
+      }
+      const response = (await chrome.tabs.sendMessage(tabId, {
+        type: 'FOCUSFIT_SET_COLOR_REDUCTION',
+        enabled,
+      })) as { applied: boolean; active: boolean }
+      setColorReductionActive(response.active)
+      if (!response.applied) {
+        setStatus('Could not toggle color reduction — simplify the page first.')
+      }
+    } catch (err) {
+      setStatus(`Color reduction toggle failed: ${String(err)}`)
     }
   }
 
@@ -136,6 +167,24 @@ function App() {
           Show original page
         </button>
       </div>
+
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 13,
+          opacity: colorReductionAvailable ? 1 : 0.5,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={colorReductionActive}
+          disabled={!colorReductionAvailable}
+          onChange={(e) => toggleColorReduction(e.target.checked)}
+        />
+        Reduce color variation
+      </label>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={pingActiveTab} style={{ padding: '6px 12px' }}>
