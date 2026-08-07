@@ -96,7 +96,12 @@ def analyze_page(request: Request, payload: AnalyzePageRequest):
     blocks = security.sanitize_blocks(payload.blocks, settings)
 
     analysis_id, summary, actions, layout, warnings = analyze(
-        blocks, payload.profile, payload.task, settings, request_id=request.state.request_id
+        blocks,
+        payload.profile,
+        payload.task,
+        settings,
+        request_id=request.state.request_id,
+        has_sensitive_forms=payload.has_sensitive_forms,
     )
 
     return AnalyzePageResponse(

@@ -30,18 +30,21 @@ def analyze(
     task: str | None,
     settings: Settings,
     request_id: str = "",
+    has_sensitive_forms: bool = False,
 ) -> Tuple[str, str, List[BlockAction], LayoutSettings, List[str]]:
     warnings: List[str] = []
 
     try:
-        raw_classifications = classify_blocks(blocks, profile, task, settings)
+        raw_classifications = classify_blocks(
+            blocks, profile, task, settings, has_sensitive_forms=has_sensitive_forms
+        )
         actions = validate_and_build_actions(raw_classifications, blocks, profile)
     except (LLMClassificationError, LLMValidationError) as exc:
         logger.warning("request_id=%s Falling back to rule engine: %s", request_id, exc)
         warnings.append("Used rule-based fallback classification (LLM unavailable or invalid).")
         actions = rule_engine.fallback_actions(blocks, profile)
 
-    blocks_by_id = {b.block_id: b for b in blocks}
+    blocks_by_id = {b.id: b for b in blocks}
     summary = _summarize(actions, blocks_by_id)
 
     layout = LayoutSettings(

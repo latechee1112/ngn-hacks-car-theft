@@ -22,7 +22,7 @@ def validate_and_build_actions(
     blocks: List[PageBlock],
     profile: VisualProfile,
 ) -> List[BlockAction]:
-    blocks_by_id: Dict[str, PageBlock] = {b.block_id: b for b in blocks}
+    blocks_by_id: Dict[str, PageBlock] = {b.id: b for b in blocks}
 
     if len(classifications) > len(blocks):
         raise LLMValidationError("LLM returned more classifications than blocks supplied")
@@ -76,7 +76,7 @@ def validate_and_build_actions(
     from services.rule_engine import fallback_action
 
     for block in blocks:
-        if block.block_id not in classified_ids:
+        if block.id not in classified_ids:
             actions.append(fallback_action(block, profile))
 
     return actions
