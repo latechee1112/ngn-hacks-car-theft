@@ -157,11 +157,11 @@ function App() {
         <div className="flex flex-col gap-2">
           <button
             type="button"
-            onClick={simplifyPage}
+            onClick={simplified ? restorePage : simplifyPage}
             className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-hover"
           >
-            <Icon name="layers" className="text-[18px]" />
-            Simplify Current Page
+            <Icon name={simplified ? 'visibility' : 'layers'} className="text-[18px]" />
+            {simplified ? 'Show Original Page' : 'Simplify Current Page'}
           </button>
           <button
             type="button"
