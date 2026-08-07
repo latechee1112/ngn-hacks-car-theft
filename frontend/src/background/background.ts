@@ -4,10 +4,10 @@ import type { AnalyzeBackendResult } from '../types/analysis'
 // content script — a content script's fetch Origin is the visited page's origin, not
 // chrome-extension://<id>, so it wouldn't match the backend's CORS allowlist.
 const BACKEND_URL = 'http://127.0.0.1:8000'
-// Generous headroom over the backend's own LLM timeout (8s by default) plus network
-// overhead - real pages send far more blocks than a quick manual test, so the LLM
-// call itself takes longer than a tiny 4-block payload would suggest.
-const ANALYZE_TIMEOUT_MS = 25000
+// Generous headroom over the backend's own LLM timeout (45s) plus network overhead -
+// real pages send far more blocks than a quick manual test (a 100+ block Wikipedia
+// page takes much longer for the LLM to classify than a tiny 4-block payload).
+const ANALYZE_TIMEOUT_MS = 60000
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Distill] service worker installed')

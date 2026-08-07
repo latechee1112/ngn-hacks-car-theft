@@ -45,6 +45,9 @@ function requestBackendAnalysis(): Promise<AnalyzeBackendResult> {
 async function handleSimplify(): Promise<SimplifyResult> {
   const result = await requestBackendAnalysis()
   if (result.ok) {
+    console.log(
+      `[Distill] backend analysis succeeded: "${result.data.summary}" (${result.data.actions.length} actions, warnings: ${JSON.stringify(result.data.warnings)})`,
+    )
     return applyBackendActions(result.data.actions, result.data.layout)
   }
   console.warn('[Distill] backend analysis unavailable, using local heuristic instead:', result.error)
