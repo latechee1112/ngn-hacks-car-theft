@@ -2,7 +2,11 @@ import { extractPage } from './extract'
 import {
   applySimplification,
   canReduceColorVariation,
+  canUseProgressiveReveal,
+  disableProgressiveReveal,
+  enableProgressiveReveal,
   isColorVariationReduced,
+  isProgressiveRevealOn,
   isSimplificationActive,
   restoreOriginalPage,
   setReduceColorVariation,
@@ -30,11 +34,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ applied, active: isColorVariationReduced() })
       return true
     }
+    case 'DISTILL_SET_PROGRESSIVE_REVEAL': {
+      if (message.enabled) {
+        const result = enableProgressiveReveal()
+        sendResponse({ applied: result.eligible, active: result.eligible })
+      } else {
+        disableProgressiveReveal()
+        sendResponse({ applied: true, active: false })
+      }
+      return true
+    }
     case 'DISTILL_STATUS':
       sendResponse({
         simplified: isSimplificationActive(),
         colorReductionAvailable: canReduceColorVariation(),
         colorReductionActive: isColorVariationReduced(),
+        progressiveRevealAvailable: canUseProgressiveReveal(),
+        progressiveRevealActive: isProgressiveRevealOn(),
       })
       return true
     default:

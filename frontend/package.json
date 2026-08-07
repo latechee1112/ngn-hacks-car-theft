@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build && vite build --config vite.background.config.ts && vite build --config vite.content.config.ts",
+    "dev": "npm run build:watch",
+    "dev:ui": "vite",
+    "build": "tsc -b && vite build --emptyOutDir && vite build --config vite.background.config.ts && vite build --config vite.content.config.ts",
+    "build:watch": "concurrently --kill-others-on-fail --names types,ui,background,content \"tsc -b --watch --preserveWatchOutput\" \"vite build --watch\" \"vite build --watch --config vite.background.config.ts\" \"vite build --watch --config vite.content.config.ts\"",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -15,15 +17,18 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/chrome": "^0.0.323",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "concurrently": "^10.0.4",
     "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.7.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.65.0",
     "vite": "^8.2.0"
