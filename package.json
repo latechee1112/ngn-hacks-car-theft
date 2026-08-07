@@ -1,0 +1,11 @@
+{
+  "name": "ngn-hacks-2026",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "dev:ui": "npm --prefix frontend run dev:ui",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint"
+  }
+}
