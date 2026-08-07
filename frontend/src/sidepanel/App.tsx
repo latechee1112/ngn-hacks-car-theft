@@ -1,15 +1,4 @@
 import { useEffect, useState } from 'react'
-import {
-  Eye,
-  EyeOff,
-  Palette,
-  Rows3,
-  ScanEye,
-  SlidersHorizontal,
-  Sparkles,
-  User,
-  Waves,
-} from 'lucide-react'
 import ToggleSwitch from './ToggleSwitch'
 
 async function getActiveTabId(): Promise<number | null> {
@@ -18,6 +7,10 @@ async function getActiveTabId(): Promise<number | null> {
 }
 
 const EXTENSION_VERSION = chrome.runtime.getManifest().version
+
+function Icon({ name, className = '' }: { name: string; className?: string }) {
+  return <span className={`material-symbols-outlined ${className}`}>{name}</span>
+}
 
 function App() {
   const [simplified, setSimplified] = useState(false)
@@ -85,129 +78,133 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col gap-4 bg-[#0b0e1a] p-4 text-white">
-      <header className="flex items-center justify-between">
+    <div className="relative mx-auto flex h-screen w-full max-w-[400px] flex-col overflow-hidden border-x border-outline bg-background">
+      <header className="flex w-full shrink-0 items-center justify-between border-b border-outline bg-background px-5 py-3">
         <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/20 text-indigo-400">
-            <ScanEye size={14} />
-          </span>
-          <span className="font-semibold">Distill</span>
+          <svg className="h-5 w-5 text-primary" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+          </svg>
+          <h1 className="text-base font-semibold tracking-tight text-on-background">Distill</h1>
         </div>
-        <ToggleSwitch checked={true} />
+        <ToggleSwitch checked={true} size="md" />
       </header>
 
-      <div
-        className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
-          simplified
-            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-            : 'border-slate-700 bg-slate-800/60 text-slate-400'
-        }`}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${simplified ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-        {simplified ? 'Local processing active' : 'Local processing idle'}
-      </div>
-
-      <button
-        type="button"
-        onClick={simplifyPage}
-        className="flex items-center justify-center gap-2 rounded-xl bg-indigo-500 py-2.5 font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-indigo-400"
-      >
-        <Sparkles size={16} />
-        Simplify Current Page
-      </button>
-
-      <button
-        type="button"
-        className="flex items-center justify-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/60 py-2.5 font-medium text-slate-200 transition-colors hover:bg-slate-800"
-      >
-        <SlidersHorizontal size={16} />
-        View Settings
-      </button>
-
-      {error && <p className="text-xs text-red-400">{error}</p>}
-
-      <div className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-300">
-          <User size={13} />
-        </span>
-        <div>
-          <p className="text-sm font-medium">Default Profile</p>
-          <p className="mt-0.5 text-xs text-slate-400">Spacing: +40% • Text: 1.15x • High Contrast</p>
-        </div>
-      </div>
-
-      <p className="mt-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-        Simplification controls
-      </p>
-
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+      <main className="flex flex-1 flex-col gap-5 overflow-y-auto bg-background p-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Intensity</span>
-          <span className="text-xs text-slate-400">50%</span>
-        </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-          <div className="h-full w-1/2 rounded-full bg-indigo-400" />
-        </div>
-      </div>
-
-      <div className="flex flex-col divide-y divide-slate-800/60 rounded-xl border border-slate-800 bg-slate-900/60 px-3">
-        <div className="flex items-center justify-between py-2.5">
-          <span className="flex items-center gap-2 text-sm font-medium text-amber-400">
-            <Waves size={15} />
-            Reduce motion
-          </span>
-          <ToggleSwitch checked={true} />
-        </div>
-        <div className="flex items-center justify-between py-2.5">
-          <span className="flex items-center gap-2 text-sm font-medium text-amber-400">
-            <Rows3 size={15} />
-            Increase spacing
-          </span>
-          <ToggleSwitch checked={true} />
-        </div>
-        <div className="flex items-center justify-between py-2.5">
-          <span className="flex items-center gap-2 text-sm font-medium text-amber-400">
-            <Eye size={15} />
-            Progressive reveal
-          </span>
-          <ToggleSwitch checked={true} />
-        </div>
-        <div className="flex items-center justify-between py-2.5">
-          <span
-            className={`flex items-center gap-2 text-sm font-medium ${
-              colorReductionAvailable ? 'text-amber-400' : 'text-amber-400/40'
+          <div
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 ${
+              simplified
+                ? 'border-[#064e3b] bg-status-bg'
+                : 'border-outline bg-surface'
             }`}
           >
-            <Palette size={15} />
-            Reduce color variation
-          </span>
-          <ToggleSwitch
-            checked={colorReductionActive}
-            disabled={!colorReductionAvailable}
-            onChange={toggleColorReduction}
-          />
+            <div className={`h-1.5 w-1.5 rounded-full ${simplified ? 'bg-status-text' : 'bg-on-surface-variant'}`} />
+            <span className={`text-xs font-medium ${simplified ? 'text-status-text' : 'text-on-surface-variant'}`}>
+              {simplified ? 'Local processing active' : 'Local processing idle'}
+            </span>
+          </div>
         </div>
-      </div>
 
-      <button
-        type="button"
-        className="mx-auto flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-slate-300"
-      >
-        <EyeOff size={13} />
-        Show everything temporarily
-      </button>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={simplifyPage}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-hover"
+          >
+            <Icon name="layers" className="text-[18px]" />
+            Simplify Current Page
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-outline bg-surface px-4 py-2 text-sm font-medium text-on-surface transition-colors hover:bg-surface-hover"
+          >
+            <Icon name="tune" className="text-[16px]" />
+            View Settings
+          </button>
+        </div>
 
-      <footer className="mt-auto flex flex-col items-center gap-1 border-t border-slate-800 pt-3">
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-          <button type="button" className="hover:text-slate-300">
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="rounded-md border border-card-border bg-card-bg p-3">
+          <div className="mb-1 flex items-center gap-2">
+            <Icon name="person" className="text-[16px] text-on-surface-variant" />
+            <h3 className="text-sm font-medium text-on-surface">Default Profile</h3>
+          </div>
+          <p className="text-xs text-on-surface-variant">Spacing: +40% • Text: 1.15x • High Contrast</p>
+        </div>
+
+        <div>
+          <h2 className="section-header mb-2 text-xs font-semibold tracking-wide text-on-surface-variant uppercase">
+            Simplification Controls
+          </h2>
+          <div className="overflow-hidden rounded-md border border-card-border bg-card-bg">
+            <div className="border-b border-card-border p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-sm font-medium text-on-surface">Intensity</label>
+                <span className="text-xs text-on-surface-variant">50%</span>
+              </div>
+              <input type="range" min={1} max={100} defaultValue={50} />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="flex cursor-pointer items-center justify-between border-b border-card-border p-3 transition-colors hover:bg-surface-hover">
+                <div className="flex items-center gap-2.5">
+                  <Icon name="animation" className="text-[18px] text-on-surface-variant" />
+                  <span className="text-sm text-on-surface">Reduce motion</span>
+                </div>
+                <ToggleSwitch checked={true} />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between border-b border-card-border p-3 transition-colors hover:bg-surface-hover">
+                <div className="flex items-center gap-2.5">
+                  <Icon name="format_line_spacing" className="text-[18px] text-on-surface-variant" />
+                  <span className="text-sm text-on-surface">Increase spacing</span>
+                </div>
+                <ToggleSwitch checked={true} />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between border-b border-card-border p-3 transition-colors hover:bg-surface-hover">
+                <div className="flex items-center gap-2.5">
+                  <Icon name="visibility" className="text-[18px] text-on-surface-variant" />
+                  <span className="text-sm text-on-surface">Progressive reveal</span>
+                </div>
+                <ToggleSwitch checked={false} />
+              </label>
+              <label className="flex cursor-pointer items-center justify-between p-3 transition-colors hover:bg-surface-hover">
+                <div className="flex items-center gap-2.5">
+                  <Icon name="palette" className="text-[18px] text-on-surface-variant" />
+                  <span className="text-sm text-on-surface">Reduce color variation</span>
+                </div>
+                <ToggleSwitch
+                  checked={colorReductionActive}
+                  disabled={!colorReductionAvailable}
+                  onChange={toggleColorReduction}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-2 pb-6">
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-transparent px-4 py-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
+          >
+            <Icon name="visibility_off" className="text-[16px]" />
+            Show everything temporarily
+          </button>
+        </div>
+      </main>
+
+      <footer className="flex w-full shrink-0 flex-col items-center gap-2 border-t border-outline bg-background px-4 py-3 text-xs text-on-surface-variant">
+        <div className="flex gap-3">
+          <a className="transition-colors hover:text-on-surface" href="#">
             Privacy
-          </button>
+          </a>
           <span>·</span>
-          <button type="button" className="hover:text-slate-300">
+          <a className="transition-colors hover:text-on-surface" href="#">
             Feedback
-          </button>
+          </a>
         </div>
-        <p className="text-[11px] text-slate-600">Distill v{EXTENSION_VERSION}</p>
+        <p>Distill v{EXTENSION_VERSION}</p>
       </footer>
     </div>
   )
