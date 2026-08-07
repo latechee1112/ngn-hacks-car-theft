@@ -8,6 +8,9 @@ import { resolve } from 'node:path'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
+    // All three extension bundles share dist/. Production builds opt into
+    // cleaning via the CLI; watch builds must preserve sibling bundles.
+    emptyOutDir: false,
     rollupOptions: {
       input: {
         sidepanel: resolve(import.meta.dirname, 'sidepanel.html'),

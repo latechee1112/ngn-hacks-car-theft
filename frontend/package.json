@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build && vite build --config vite.background.config.ts && vite build --config vite.content.config.ts",
+    "dev": "npm run build:watch",
+    "dev:ui": "vite",
+    "build": "tsc -b && vite build --emptyOutDir && vite build --config vite.background.config.ts && vite build --config vite.content.config.ts",
+    "build:watch": "concurrently --kill-others-on-fail --names types,ui,background,content \"tsc -b --watch --preserveWatchOutput\" \"vite build --watch\" \"vite build --watch --config vite.background.config.ts\" \"vite build --watch --config vite.content.config.ts\"",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -21,6 +23,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "concurrently": "^10.0.4",
     "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",

@@ -16,6 +16,8 @@ function App() {
   const [simplified, setSimplified] = useState(false)
   const [colorReductionAvailable, setColorReductionAvailable] = useState(false)
   const [colorReductionActive, setColorReductionActive] = useState(false)
+  const [progressiveRevealAvailable, setProgressiveRevealAvailable] = useState(false)
+  const [progressiveRevealActive, setProgressiveRevealActive] = useState(false)
   const [error, setError] = useState<string>('')
 
   async function refreshStatus() {
@@ -26,14 +28,20 @@ function App() {
         simplified: boolean
         colorReductionAvailable: boolean
         colorReductionActive: boolean
+        progressiveRevealAvailable: boolean
+        progressiveRevealActive: boolean
       }
       setSimplified(response.simplified)
       setColorReductionAvailable(response.colorReductionAvailable)
       setColorReductionActive(response.colorReductionActive)
+      setProgressiveRevealAvailable(response.progressiveRevealAvailable)
+      setProgressiveRevealActive(response.progressiveRevealActive)
     } catch {
       setSimplified(false)
       setColorReductionAvailable(false)
       setColorReductionActive(false)
+      setProgressiveRevealAvailable(false)
+      setProgressiveRevealActive(false)
     }
   }
 
@@ -54,6 +62,7 @@ function App() {
       })) as { primaryFound: boolean; deemphasizedCount: number }
       setSimplified(true)
       setColorReductionAvailable(response.primaryFound)
+      setProgressiveRevealAvailable(response.primaryFound)
     } catch (err) {
       setError(`Couldn't simplify this page: ${String(err)}`)
     }
@@ -74,6 +83,27 @@ function App() {
       setColorReductionActive(response.active)
     } catch (err) {
       setError(`Couldn't toggle color reduction: ${String(err)}`)
+    }
+  }
+
+  async function toggleProgressiveReveal(enabled: boolean) {
+    setError('')
+    try {
+      const tabId = await getActiveTabId()
+      if (!tabId) {
+        setError('No active tab found')
+        return
+      }
+      const response = (await chrome.tabs.sendMessage(tabId, {
+        type: 'DISTILL_SET_PROGRESSIVE_REVEAL',
+        enabled,
+      })) as { applied: boolean; active: boolean }
+      setProgressiveRevealActive(response.active)
+      if (enabled && !response.applied) {
+        setError('Not enough sections to paginate — showing full article.')
+      }
+    } catch (err) {
+      setError(`Couldn't toggle progressive reveal: ${String(err)}`)
     }
   }
 
@@ -166,7 +196,11 @@ function App() {
                   <Icon name="visibility" className="text-[18px] text-on-surface-variant" />
                   <span className="text-sm text-on-surface">Progressive reveal</span>
                 </div>
-                <ToggleSwitch checked={false} />
+                <ToggleSwitch
+                  checked={progressiveRevealActive}
+                  disabled={!progressiveRevealAvailable}
+                  onChange={toggleProgressiveReveal}
+                />
               </label>
               <label className="flex cursor-pointer items-center justify-between p-3 transition-colors hover:bg-surface-hover">
                 <div className="flex items-center gap-2.5">

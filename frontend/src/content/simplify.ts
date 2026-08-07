@@ -9,6 +9,9 @@ const DEEMPHASIZE_CLASS = 'distill-deemphasize'
 const UNSTICK_CLASS = 'distill-unstick'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
 const NEUTRAL_COLOR = '#1a1a1a'
+const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
+const PROGRESSIVE_CONTROLS_ID = 'distill-progressive-controls'
+const SECTION_HEADING_SELECTOR = /^h[23]$/i
 
 const NOISE_SELECTOR =
   'nav, aside, footer, [role="navigation"], [role="complementary"], [role="contentinfo"], ' +
@@ -146,6 +149,43 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):
 #${RESTORE_BTN_ID}:hover {
   opacity: 0.9;
 }
+html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
+  display: none !important;
+}
+#${PROGRESSIVE_CONTROLS_ID} {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1a1a1a;
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: 600 13px system-ui, sans-serif;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+#${PROGRESSIVE_CONTROLS_ID} button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+#${PROGRESSIVE_CONTROLS_ID} button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+#${PROGRESSIVE_CONTROLS_ID} button:hover:not(:disabled) {
+  opacity: 0.8;
+}
+#${PROGRESSIVE_CONTROLS_ID} [data-role="label"] {
+  opacity: 0.8;
+  white-space: nowrap;
+}
 `
   document.head.appendChild(style)
 }
@@ -218,7 +258,223 @@ export function setReduceColorVariation(enabled: boolean): boolean {
   return true
 }
 
+// --- Progressive reveal ---------------------------------------------------
+
+export interface ProgressiveRevealResult {
+  eligible: boolean
+  totalSections: number
+  currentIndex: number
+}
+
+let sections: Element[][] = []
+let currentSectionIndex = 0
+
+const HEADING_WRAPPER_TEXT_LIMIT = 150
+
+// Some sites (current Wikipedia included) wrap each top-level section in its own
+// container instead of leaving headings as flat siblings of their content — e.g.
+// <section><h2>…</h2><p>…</p></section>. Wikipedia goes one level further and wraps
+// just the heading itself too: <section><div class="mw-heading"><h2>…</h2></div>…</section>.
+// Treat a container as a section wrapper if its first child either IS a heading, or is a
+// short "heading wrapper" div/span (a handful of characters — enough for a heading, edit
+// link, anchor) that itself contains one.
+function isSectionWrapper(el: Element): boolean {
+  const first = el.firstElementChild
+  if (!first) return false
+  if (SECTION_HEADING_SELECTOR.test(first.tagName)) return true
+  const nestedHeading = first.querySelector('h2, h3')
+  return !!nestedHeading && (first.textContent || '').length < HEADING_WRAPPER_TEXT_LIMIT
+}
+
+function isHeadingBearing(el: Element): boolean {
+  return SECTION_HEADING_SELECTOR.test(el.tagName) || isSectionWrapper(el)
+}
+
+// Article containers are rarely flat — e.g. Wikipedia nests the real content
+// several <div> levels below <main>. Descend into whichever child holds the most
+// heading-bearing elements until we land on the level where sections (flat headings
+// or per-section wrapper containers) are direct children.
+function findContentRoot(root: Element, depth = 0): Element {
+  if (depth > 6) return root
+
+  const directHeadingBearingCount = Array.from(root.children).filter(isHeadingBearing).length
+  if (directHeadingBearingCount >= 2) return root
+
+  let best: Element | null = null
+  let bestCount = 0
+  for (const child of Array.from(root.children)) {
+    const count = child.querySelectorAll('h2, h3').length
+    if (count > bestCount) {
+      bestCount = count
+      best = child
+    }
+  }
+  if (best && bestCount >= 2) return findContentRoot(best, depth + 1)
+
+  return root
+}
+
+// Groups the content root's direct children into sections, handling both shapes:
+// flat (headings interspersed with their content as siblings) and wrapped (each
+// section pre-packaged in its own container). Never splits an element mid-section.
+function buildSections(root: Element): Element[][] {
+  const children = Array.from(root.children)
+  const wrapperCount = children.filter(isSectionWrapper).length
+
+  if (wrapperCount >= 2) {
+    const groups: Element[][] = []
+    let intro: Element[] = []
+    let seenWrapper = false
+    children.forEach((child) => {
+      if (isSectionWrapper(child)) {
+        if (!seenWrapper && intro.length) groups.push(intro)
+        seenWrapper = true
+        groups.push([child])
+      } else if (!seenWrapper) {
+        intro.push(child)
+      } else {
+        // Trailing content after the last wrapper (e.g. a "Categories" list) rides along with it.
+        groups[groups.length - 1]?.push(child)
+      }
+    })
+    if (!seenWrapper && intro.length) groups.push(intro)
+    return groups
+  }
+
+  const groups: Element[][] = []
+  let current: Element[] = []
+
+  children.forEach((child) => {
+    if (SECTION_HEADING_SELECTOR.test(child.tagName)) {
+      if (current.length) groups.push(current)
+      current = [child]
+    } else {
+      current.push(child)
+    }
+  })
+  if (current.length) groups.push(current)
+
+  return groups
+}
+
+function isProgressiveRevealActive(): boolean {
+  return sections.length > 0
+}
+
+function applySectionVisibility(): void {
+  sections.forEach((group, index) => {
+    group.forEach((el) => {
+      saveOriginal(el)
+      el.classList.remove(DEEMPHASIZE_CLASS, SECTION_HIDDEN_CLASS)
+      if (index === currentSectionIndex) {
+        // current section: no extra class, full clarity
+      } else if (index === currentSectionIndex + 1) {
+        el.classList.add(DEEMPHASIZE_CLASS)
+      } else {
+        el.classList.add(SECTION_HIDDEN_CLASS)
+      }
+    })
+  })
+}
+
+function updateProgressiveControls(): void {
+  const bar = document.getElementById(PROGRESSIVE_CONTROLS_ID)
+  if (!bar) return
+  const label = bar.querySelector('[data-role="label"]')
+  if (label) label.textContent = `Section ${currentSectionIndex + 1} of ${sections.length}`
+  const prevBtn = bar.querySelector<HTMLButtonElement>('[data-role="prev"]')
+  const nextBtn = bar.querySelector<HTMLButtonElement>('[data-role="next"]')
+  if (prevBtn) prevBtn.disabled = currentSectionIndex === 0
+  if (nextBtn) nextBtn.disabled = currentSectionIndex === sections.length - 1
+}
+
+function goToSection(index: number): void {
+  currentSectionIndex = Math.max(0, Math.min(index, sections.length - 1))
+  applySectionVisibility()
+  updateProgressiveControls()
+}
+
+function removeProgressiveControls(): void {
+  document.getElementById(PROGRESSIVE_CONTROLS_ID)?.remove()
+}
+
+function ensureProgressiveControls(): void {
+  if (document.getElementById(PROGRESSIVE_CONTROLS_ID)) {
+    updateProgressiveControls()
+    return
+  }
+  const bar = document.createElement('div')
+  bar.id = PROGRESSIVE_CONTROLS_ID
+
+  const prevBtn = document.createElement('button')
+  prevBtn.type = 'button'
+  prevBtn.dataset.role = 'prev'
+  prevBtn.textContent = '‹ Prev'
+  prevBtn.addEventListener('click', () => goToSection(currentSectionIndex - 1))
+
+  const label = document.createElement('span')
+  label.dataset.role = 'label'
+
+  const nextBtn = document.createElement('button')
+  nextBtn.type = 'button'
+  nextBtn.dataset.role = 'next'
+  nextBtn.textContent = 'Next ›'
+  nextBtn.addEventListener('click', () => goToSection(currentSectionIndex + 1))
+
+  const showAllBtn = document.createElement('button')
+  showAllBtn.type = 'button'
+  showAllBtn.dataset.role = 'show-all'
+  showAllBtn.textContent = 'Show All'
+  showAllBtn.addEventListener('click', disableProgressiveReveal)
+
+  bar.append(prevBtn, label, nextBtn, showAllBtn)
+  document.body.appendChild(bar)
+  updateProgressiveControls()
+}
+
+export function canUseProgressiveReveal(): boolean {
+  return isSimplificationActive() && !!getPrimaryElement()
+}
+
+export function isProgressiveRevealOn(): boolean {
+  return isProgressiveRevealActive()
+}
+
+export function enableProgressiveReveal(): ProgressiveRevealResult {
+  const primary = getPrimaryElement()
+  if (!isSimplificationActive() || !primary) {
+    return { eligible: false, totalSections: 0, currentIndex: 0 }
+  }
+
+  const root = findContentRoot(primary)
+  const built = buildSections(root)
+  const headingSectionCount = built.filter((group) => isHeadingBearing(group[0])).length
+
+  // Too few headings to meaningfully paginate — leave the article fully visible.
+  if (headingSectionCount < 2) {
+    sections = []
+    return { eligible: false, totalSections: 0, currentIndex: 0 }
+  }
+
+  sections = built
+  currentSectionIndex = 0
+  applySectionVisibility()
+  ensureProgressiveControls()
+
+  return { eligible: true, totalSections: sections.length, currentIndex: currentSectionIndex }
+}
+
+export function disableProgressiveReveal(): void {
+  sections.forEach((group) => {
+    group.forEach((el) => el.classList.remove(DEEMPHASIZE_CLASS, SECTION_HIDDEN_CLASS))
+  })
+  sections = []
+  currentSectionIndex = 0
+  removeProgressiveControls()
+}
+
 export function restoreOriginalPage(): void {
+  disableProgressiveReveal()
   restoreAllOriginal()
   document.documentElement.removeAttribute(SIMPLIFIED_ATTR)
   document.getElementById(STYLE_TAG_ID)?.remove()
