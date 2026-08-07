@@ -1,4 +1,4 @@
-import { isAdLike, isPopupLike, isStickyOrFixed, isVisible } from './dom-heuristics'
+import { isAdLike, isPopupLike, isProtectedFromSimplification, isStickyOrFixed, isVisible } from './dom-heuristics'
 import { restoreAllOriginal, saveOriginal } from './originalState'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
@@ -50,6 +50,7 @@ function collectNoiseTargets(primary: Element | null): Element[] {
   document.querySelectorAll(NOISE_SELECTOR).forEach((el) => {
     if (primary && (primary === el || primary.contains(el))) return
     if (!isVisible(el)) return
+    if (isProtectedFromSimplification(el)) return
     if (isAdLike(el) || isPopupLike(el) || ['nav', 'aside', 'footer'].includes(el.tagName.toLowerCase())) {
       targets.add(el)
       return
@@ -58,12 +59,15 @@ function collectNoiseTargets(primary: Element | null): Element[] {
     if (role === 'navigation' || role === 'complementary' || role === 'contentinfo') targets.add(el)
   })
 
-  // Sticky/fixed chrome (cookie banners, sticky headers) often isn't caught by the
-  // selector above, so do a bounded pass over top-level containers by computed style.
+  // Sticky/fixed chrome (promo bars, sticky headers) often isn't caught by the selector
+  // above, so do a bounded pass over top-level containers by computed style. Safety-critical
+  // fixed chrome — cookie/consent banners, warnings — must be excluded here specifically,
+  // since "sticky/fixed" is exactly the shape a consent banner normally takes.
   document.querySelectorAll('body > *, header, div, section').forEach((el) => {
     if (targets.has(el)) return
     if (primary && (primary === el || primary.contains(el))) return
     if (!isVisible(el)) return
+    if (isProtectedFromSimplification(el)) return
     if (isStickyOrFixed(el)) targets.add(el)
   })
 
@@ -134,56 +138,68 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):
 }
 #${RESTORE_BTN_ID} {
   position: fixed;
-  bottom: 16px;
-  right: 16px;
+  bottom: 20px;
+  right: 20px;
   z-index: 2147483647;
   background: #1a1a1a;
   color: #fff;
-  border: none;
+  border: 2px solid transparent;
   border-radius: 999px;
-  padding: 10px 18px;
-  font: 600 13px system-ui, sans-serif;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  padding: 14px 24px;
+  min-height: 48px;
+  font: 700 16px system-ui, sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
 #${RESTORE_BTN_ID}:hover {
-  opacity: 0.9;
+  background: #333;
+}
+#${RESTORE_BTN_ID}:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
 }
 html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
   display: none !important;
 }
 #${PROGRESSIVE_CONTROLS_ID} {
   position: fixed;
-  bottom: 16px;
-  left: 16px;
+  bottom: 18px;
+  left: 18px;
   z-index: 2147483647;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   background: #1a1a1a;
   color: #fff;
-  border-radius: 999px;
-  padding: 8px 14px;
-  font: 600 13px system-ui, sans-serif;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  border-radius: 14px;
+  padding: 11px 16px;
+  font: 700 15px/1.3 system-ui, sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #${PROGRESSIVE_CONTROLS_ID} button {
-  background: transparent;
-  border: none;
+  background: #333;
+  border: 2px solid transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 9px 15px;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 9px;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:disabled {
   opacity: 0.35;
   cursor: default;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:hover:not(:disabled) {
-  opacity: 0.8;
+  background: #4a4a4a;
+}
+#${PROGRESSIVE_CONTROLS_ID} button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
 }
 #${PROGRESSIVE_CONTROLS_ID} [data-role="label"] {
-  opacity: 0.8;
+  opacity: 0.9;
   white-space: nowrap;
 }
 `
@@ -361,16 +377,14 @@ function isProgressiveRevealActive(): boolean {
   return sections.length > 0
 }
 
+// Block-by-block reveal: only the current section is visible. Every other
+// section — before or after — is fully hidden, not faded or peeking.
 function applySectionVisibility(): void {
   sections.forEach((group, index) => {
     group.forEach((el) => {
       saveOriginal(el)
       el.classList.remove(DEEMPHASIZE_CLASS, SECTION_HIDDEN_CLASS)
-      if (index === currentSectionIndex) {
-        // current section: no extra class, full clarity
-      } else if (index === currentSectionIndex + 1) {
-        el.classList.add(DEEMPHASIZE_CLASS)
-      } else {
+      if (index !== currentSectionIndex) {
         el.classList.add(SECTION_HIDDEN_CLASS)
       }
     })
@@ -392,6 +406,7 @@ function goToSection(index: number): void {
   currentSectionIndex = Math.max(0, Math.min(index, sections.length - 1))
   applySectionVisibility()
   updateProgressiveControls()
+  window.scrollTo({ top: 0, behavior: 'auto' })
 }
 
 function removeProgressiveControls(): void {
@@ -405,26 +420,32 @@ function ensureProgressiveControls(): void {
   }
   const bar = document.createElement('div')
   bar.id = PROGRESSIVE_CONTROLS_ID
+  bar.setAttribute('role', 'group')
+  bar.setAttribute('aria-label', 'Progressive reveal navigation')
 
   const prevBtn = document.createElement('button')
   prevBtn.type = 'button'
   prevBtn.dataset.role = 'prev'
-  prevBtn.textContent = '‹ Prev'
+  prevBtn.textContent = '‹ Previous'
+  prevBtn.setAttribute('aria-label', 'Show previous section')
   prevBtn.addEventListener('click', () => goToSection(currentSectionIndex - 1))
 
   const label = document.createElement('span')
   label.dataset.role = 'label'
+  label.setAttribute('aria-live', 'polite')
 
   const nextBtn = document.createElement('button')
   nextBtn.type = 'button'
   nextBtn.dataset.role = 'next'
   nextBtn.textContent = 'Next ›'
+  nextBtn.setAttribute('aria-label', 'Show next section')
   nextBtn.addEventListener('click', () => goToSection(currentSectionIndex + 1))
 
   const showAllBtn = document.createElement('button')
   showAllBtn.type = 'button'
   showAllBtn.dataset.role = 'show-all'
   showAllBtn.textContent = 'Show All'
+  showAllBtn.setAttribute('aria-label', 'Show all sections')
   showAllBtn.addEventListener('click', disableProgressiveReveal)
 
   bar.append(prevBtn, label, nextBtn, showAllBtn)

@@ -68,6 +68,25 @@ function App() {
     }
   }
 
+  async function restorePage() {
+    setError('')
+    try {
+      const tabId = await getActiveTabId()
+      if (!tabId) {
+        setError('No active tab found')
+        return
+      }
+      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_RESTORE' })
+      setSimplified(false)
+      setColorReductionAvailable(false)
+      setColorReductionActive(false)
+      setProgressiveRevealAvailable(false)
+      setProgressiveRevealActive(false)
+    } catch (err) {
+      setError(`Couldn't restore this page: ${String(err)}`)
+    }
+  }
+
   async function toggleColorReduction(enabled: boolean) {
     setError('')
     try {
@@ -138,11 +157,11 @@ function App() {
         <div className="flex flex-col gap-2">
           <button
             type="button"
-            onClick={simplifyPage}
+            onClick={simplified ? restorePage : simplifyPage}
             className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-hover"
           >
-            <Icon name="layers" className="text-[18px]" />
-            Simplify Current Page
+            <Icon name={simplified ? 'visibility' : 'layers'} className="text-[18px]" />
+            {simplified ? 'Show Original Page' : 'Simplify Current Page'}
           </button>
           <button
             type="button"
