@@ -17,7 +17,7 @@ function App() {
     try {
       const tabId = await getActiveTabId()
       if (!tabId) return
-      const response = (await chrome.tabs.sendMessage(tabId, { type: 'FOCUSFIT_STATUS' })) as {
+      const response = (await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_STATUS' })) as {
         simplified: boolean
         colorReductionAvailable: boolean
         colorReductionActive: boolean
@@ -45,7 +45,7 @@ function App() {
         setStatus('No active tab found')
         return
       }
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'FOCUSFIT_PING' })
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_PING' })
       setStatus(`Content script responded: ${JSON.stringify(response)}`)
     } catch (err) {
       setStatus(`No response (content script not loaded on this page): ${String(err)}`)
@@ -62,7 +62,7 @@ function App() {
         return
       }
       const response = (await chrome.tabs.sendMessage(tabId, {
-        type: 'FOCUSFIT_EXTRACT',
+        type: 'DISTILL_EXTRACT',
       })) as ExtractionResult
       setStatus(`Extracted ${response.blocks.length} blocks`)
       setResult(response)
@@ -80,7 +80,7 @@ function App() {
         return
       }
       const response = (await chrome.tabs.sendMessage(tabId, {
-        type: 'FOCUSFIT_SIMPLIFY',
+        type: 'DISTILL_SIMPLIFY',
       })) as { primaryFound: boolean; deemphasizedCount: number }
       setSimplified(true)
       setColorReductionAvailable(response.primaryFound)
@@ -102,7 +102,7 @@ function App() {
         setStatus('No active tab found')
         return
       }
-      await chrome.tabs.sendMessage(tabId, { type: 'FOCUSFIT_RESTORE' })
+      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_RESTORE' })
       setSimplified(false)
       setColorReductionAvailable(false)
       setColorReductionActive(false)
@@ -120,7 +120,7 @@ function App() {
         return
       }
       const response = (await chrome.tabs.sendMessage(tabId, {
-        type: 'FOCUSFIT_SET_COLOR_REDUCTION',
+        type: 'DISTILL_SET_COLOR_REDUCTION',
         enabled,
       })) as { applied: boolean; active: boolean }
       setColorReductionActive(response.active)
@@ -141,7 +141,7 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <h1 style={{ fontSize: 18, margin: 0 }}>FocusFit</h1>
+      <h1 style={{ fontSize: 18, margin: 0 }}>Distill</h1>
       <p style={{ fontSize: 13, color: '#555', margin: 0 }}>Extension scaffold running.</p>
 
       {simplified && (

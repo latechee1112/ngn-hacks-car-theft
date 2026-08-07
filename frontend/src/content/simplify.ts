@@ -1,13 +1,13 @@
 import { isAdLike, isPopupLike, isStickyOrFixed, isVisible } from './dom-heuristics'
 import { restoreAllOriginal, saveOriginal } from './originalState'
 
-const SIMPLIFIED_ATTR = 'data-focusfit-simplified'
-const STYLE_TAG_ID = 'focusfit-global-style'
-const RESTORE_BTN_ID = 'focusfit-restore-button'
-const PRIMARY_CLASS = 'focusfit-primary-content'
-const DEEMPHASIZE_CLASS = 'focusfit-deemphasize'
-const UNSTICK_CLASS = 'focusfit-unstick'
-const NEUTRAL_COLOR_CLASS = 'focusfit-neutral-color'
+const SIMPLIFIED_ATTR = 'data-distill-simplified'
+const STYLE_TAG_ID = 'distill-global-style'
+const RESTORE_BTN_ID = 'distill-restore-button'
+const PRIMARY_CLASS = 'distill-primary-content'
+const DEEMPHASIZE_CLASS = 'distill-deemphasize'
+const UNSTICK_CLASS = 'distill-unstick'
+const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
 const NEUTRAL_COLOR = '#1a1a1a'
 
 const NOISE_SELECTOR =

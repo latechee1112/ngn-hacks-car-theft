@@ -1,4 +1,4 @@
-// Snapshots className/inline-style before FocusFit touches an element, so any transform
+// Snapshots className/inline-style before Distill touches an element, so any transform
 // (local rules here, or backend TransformationActions later) can be undone exactly.
 // Nodes are never removed — only class/style are ever mutated — so restoring these two
 // values is always sufficient to put the page back exactly as it was.

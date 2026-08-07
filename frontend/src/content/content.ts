@@ -8,29 +8,29 @@ import {
   setReduceColorVariation,
 } from './simplify'
 
-console.log('[FocusFit] content script injected on', window.location.href)
+console.log('[Distill] content script injected on', window.location.href)
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message?.type) {
-    case 'FOCUSFIT_PING':
+    case 'DISTILL_PING':
       sendResponse({ ok: true, title: document.title, url: window.location.href })
       return true
-    case 'FOCUSFIT_EXTRACT':
+    case 'DISTILL_EXTRACT':
       sendResponse(extractPage())
       return true
-    case 'FOCUSFIT_SIMPLIFY':
+    case 'DISTILL_SIMPLIFY':
       sendResponse(applySimplification())
       return true
-    case 'FOCUSFIT_RESTORE':
+    case 'DISTILL_RESTORE':
       restoreOriginalPage()
       sendResponse({ ok: true })
       return true
-    case 'FOCUSFIT_SET_COLOR_REDUCTION': {
+    case 'DISTILL_SET_COLOR_REDUCTION': {
       const applied = setReduceColorVariation(!!message.enabled)
       sendResponse({ applied, active: isColorVariationReduced() })
       return true
     }
-    case 'FOCUSFIT_STATUS':
+    case 'DISTILL_STATUS':
       sendResponse({
         simplified: isSimplificationActive(),
         colorReductionAvailable: canReduceColorVariation(),

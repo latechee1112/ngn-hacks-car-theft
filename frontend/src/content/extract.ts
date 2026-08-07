@@ -1,7 +1,7 @@
 import type { ElementType, ExtractionResult, PageBlock, PageBlockPosition } from '../types/page'
 import { isAdLike, isPopupLike, isSidebarLike, isVisible } from './dom-heuristics'
 
-export const FF_ID_ATTR = 'data-focusfit-id'
+export const FF_ID_ATTR = 'data-distill-id'
 
 const TEXT_PREVIEW_MAX = 300
 const LINK_GROUP_MIN_LINKS = 4

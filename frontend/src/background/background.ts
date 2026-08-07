@@ -1,5 +1,5 @@
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[FocusFit] service worker installed')
+  console.log('[Distill] service worker installed')
 })
 
 // Open the side panel when the user clicks the toolbar icon (instead of a popup).

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "FocusFit",
+  "name": "Distill",
   "version": "0.1.0",
   "description": "Simplifies cluttered webpages based on your calibrated visual preferences.",
   "action": {},
