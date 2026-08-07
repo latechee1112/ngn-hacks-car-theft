@@ -1,16 +1,16 @@
-import type { ElementType, ExtractionResult, PageBlock, PageBlockPosition } from '../types/page'
-import { isAdLike, isPopupLike, isSidebarLike, isVisible } from './dom-heuristics'
+import type { BoundingBox, ExtractionResult, Landmark, PageBlock } from '../types/page'
+import { classNameString, isAdLike, isPopupLike, isSidebarLike, isStickyOrFixed, isVisible } from './dom-heuristics'
 
 export const FF_ID_ATTR = 'data-distill-id'
 
-const TEXT_PREVIEW_MAX = 300
+const TEXT_MAX = 300
 const LINK_GROUP_MIN_LINKS = 4
 
-// Broad net of tags/attributes worth inspecting. categorize() does the real filtering.
+// Broad net of tags/attributes worth inspecting. isExtractable() does the real filtering.
 const CANDIDATE_SELECTOR = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'p', 'article', 'section', 'nav', 'aside', 'header', 'footer',
-  'form', 'input', 'select', 'textarea', 'button',
+  'p', 'main', 'article', 'section', 'nav', 'aside', 'header', 'footer',
+  'form', 'label', 'input', 'select', 'textarea', 'button', 'dialog',
   'img', 'picture', 'svg', 'video', 'iframe',
   '[role]',
   '[class*="ad" i]', '[id*="ad" i]',
@@ -22,35 +22,25 @@ const CANDIDATE_SELECTOR = [
 
 const VIDEO_EMBED_PATTERN = /youtube|vimeo|player/i
 const PAYMENT_FIELD_PATTERN = /card.?number|cvv|cvc|expir|credit.?card/i
+const CONSENT_PATTERN = /consent|cookie|gdpr|accept all|reject all|manage preferences/i
+const WARNING_PATTERN = /warning|error|alert/i
 
-function categorize(el: Element): ElementType | null {
+function isExtractable(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
-  const role = el.getAttribute('role')
-
-  if (isPopupLike(el)) return 'popup'
-  if (isAdLike(el)) return 'ad'
-  if (tag === 'nav' || role === 'navigation') return 'nav'
-  if (isSidebarLike(el)) return 'sidebar'
-  if (tag === 'article') return 'article'
-  if (/^h[1-6]$/.test(tag)) return 'heading'
-  if (tag === 'form') return 'form'
-  if (tag === 'input' || tag === 'select' || tag === 'textarea') return 'input'
+  if (isPopupLike(el)) return true
+  if (isAdLike(el)) return true
+  if (isSidebarLike(el)) return true
+  if (isStickyOrFixed(el)) return true
   if (
-    tag === 'button' ||
-    role === 'button' ||
-    (tag === 'input' && ['submit', 'button'].includes((el as HTMLInputElement).type))
+    [
+      'nav', 'aside', 'article', 'section', 'header', 'footer', 'main',
+      'form', 'dialog', 'label', 'input', 'select', 'textarea', 'button',
+      'img', 'picture', 'svg', 'video', 'iframe', 'p',
+    ].includes(tag)
   ) {
-    return 'button'
+    return true
   }
-  if (tag === 'video' || (tag === 'iframe' && VIDEO_EMBED_PATTERN.test(el.getAttribute('src') || ''))) return 'video'
-  if (tag === 'img' || tag === 'picture' || tag === 'svg') return 'image'
-  if (tag === 'p') return 'paragraph'
-  if (tag === 'section') return 'section'
-
-  const cs = getComputedStyle(el)
-  if (cs.position === 'fixed' || cs.position === 'sticky') return 'sticky'
-
-  return null
+  return /^h[1-6]$/.test(tag)
 }
 
 function findLinkGroups(): Element[] {
@@ -85,6 +75,23 @@ function roleOf(el: Element): string {
   return implicit[el.tagName.toLowerCase()] || el.tagName.toLowerCase()
 }
 
+// Maps to the backend's landmark vocabulary: main, article, nav, aside,
+// header, footer, form, dialog, other. Non-landmark elements get undefined
+// rather than "other" so the field is only set when it's actually meaningful.
+function landmarkOf(el: Element): Landmark | undefined {
+  const tag = el.tagName.toLowerCase()
+  const role = el.getAttribute('role')
+  if (tag === 'main' || role === 'main') return 'main'
+  if (tag === 'article') return 'article'
+  if (tag === 'nav' || role === 'navigation') return 'nav'
+  if (tag === 'aside' || role === 'complementary') return 'aside'
+  if (tag === 'header' || role === 'banner') return 'header'
+  if (tag === 'footer' || role === 'contentinfo') return 'footer'
+  if (tag === 'form' || role === 'form') return 'form'
+  if (tag === 'dialog' || role === 'dialog' || el.getAttribute('aria-modal') === 'true') return 'dialog'
+  return undefined
+}
+
 function isInteractiveOf(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
   if (['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tag)) return true
@@ -96,30 +103,79 @@ function isInteractiveOf(el: Element): boolean {
   return getComputedStyle(el).cursor === 'pointer'
 }
 
-function isFixedOf(el: Element): boolean {
-  const position = getComputedStyle(el).position
-  return position === 'fixed' || position === 'sticky'
+function isFormControlOf(el: Element): boolean {
+  return ['input', 'select', 'textarea'].includes(el.tagName.toLowerCase())
 }
 
-function hasAnimationOf(el: Element): boolean {
-  const cs = getComputedStyle(el)
-  if (cs.animationName !== 'none') return true
-  return cs.transitionDuration.split(',').some((d) => parseFloat(d) > 0)
+function isFormInstructionOf(el: Element): boolean {
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'label' || tag === 'legend') return true
+  if (!el.closest('form')) return false
+  return tag === 'p' || tag === 'small'
 }
 
-function positionOf(el: Element): PageBlockPosition {
+function isPasswordFieldOf(el: Element): boolean {
+  return el.tagName.toLowerCase() === 'input' && (el as HTMLInputElement).type === 'password'
+}
+
+function isPaymentFieldOf(el: Element): boolean {
+  if (!isFormControlOf(el)) return false
+  const autocomplete = el.getAttribute('autocomplete') || ''
+  if (autocomplete.startsWith('cc-')) return true
+  const hay = [
+    el.getAttribute('name'),
+    el.getAttribute('id'),
+    el.getAttribute('placeholder'),
+    el.getAttribute('aria-label'),
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return PAYMENT_FIELD_PATTERN.test(hay)
+}
+
+function isConsentControlOf(el: Element): boolean {
+  if (!isInteractiveOf(el)) return false
+  const hay = [el.textContent, el.getAttribute('aria-label'), classNameString(el)].filter(Boolean).join(' ')
+  return CONSENT_PATTERN.test(hay)
+}
+
+function isWarningOf(el: Element): boolean {
+  const role = el.getAttribute('role')
+  if (role === 'alert' || role === 'alertdialog') return true
+  if (el.getAttribute('aria-live') === 'assertive') return true
+  return WARNING_PATTERN.test(classNameString(el))
+}
+
+function isAutoplayMediaOf(el: Element): boolean {
+  const tag = el.tagName.toLowerCase()
+  if ((tag === 'video' || tag === 'audio') && (el as HTMLMediaElement).autoplay) return true
+  if (tag === 'iframe') {
+    const src = el.getAttribute('src') || ''
+    return VIDEO_EMBED_PATTERN.test(src) && /autoplay=1/i.test(src)
+  }
+  return false
+}
+
+// Viewport-relative fractions (0-1), matching the backend's BoundingBox contract —
+// getBoundingClientRect() is already viewport-relative, so no scroll offset is added.
+// Clamped because elements partially or fully outside the viewport otherwise produce
+// values <0 or >1, which the backend rejects outright.
+function boundingBoxOf(el: Element): BoundingBox {
   const rect = el.getBoundingClientRect()
+  const vw = window.innerWidth || document.documentElement.clientWidth || 1
+  const vh = window.innerHeight || document.documentElement.clientHeight || 1
+  const clamp = (n: number) => Math.min(1, Math.max(0, n))
   return {
-    x: Math.round(rect.left + window.scrollX),
-    y: Math.round(rect.top + window.scrollY),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
+    x: clamp(rect.left / vw),
+    y: clamp(rect.top / vh),
+    width: clamp(rect.width / vw),
+    height: clamp(rect.height / vh),
   }
 }
 
 function truncate(text: string): string {
   const collapsed = text.replace(/\s+/g, ' ').trim()
-  return collapsed.length > TEXT_PREVIEW_MAX ? `${collapsed.slice(0, TEXT_PREVIEW_MAX)}…` : collapsed
+  return collapsed.length > TEXT_MAX ? `${collapsed.slice(0, TEXT_MAX)}…` : collapsed
 }
 
 function getAssociatedLabelText(el: Element): string {
@@ -134,8 +190,8 @@ function getAssociatedLabelText(el: Element): string {
 
 // Never reads .value — only label/placeholder/aria text, so field contents (passwords,
 // payment numbers, any user input) never leave the page.
-function textPreviewOf(el: Element, elementType: ElementType): string {
-  if (elementType === 'input') {
+function textOf(el: Element): string {
+  if (isFormControlOf(el)) {
     const label = getAssociatedLabelText(el) || el.getAttribute('placeholder') || el.getAttribute('aria-label') || ''
     return truncate(label)
   }
@@ -171,23 +227,31 @@ function nextIdCounter(): number {
   return max + 1
 }
 
-function buildBlock(el: Element, elementType: ElementType, counter: { n: number }): PageBlock {
+function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: boolean } = {}): PageBlock {
   let id = el.getAttribute(FF_ID_ATTR)
   if (!id) {
     id = `ff-${counter.n++}`
     el.setAttribute(FF_ID_ATTR, id)
   }
   return {
-    id,
+    blockId: id,
     tag: el.tagName.toLowerCase(),
+    landmark: landmarkOf(el),
     role: roleOf(el),
-    textPreview: textPreviewOf(el, elementType),
-    elementType,
-    position: positionOf(el),
+    text: textOf(el),
     isInteractive: isInteractiveOf(el),
-    isFixed: isFixedOf(el),
-    hasAnimation: hasAnimationOf(el),
-    linkCount: el.querySelectorAll('a').length,
+    isFormControl: isFormControlOf(el),
+    isFormInstruction: isFormInstructionOf(el),
+    isPasswordField: isPasswordFieldOf(el),
+    isPaymentField: isPaymentFieldOf(el),
+    isConsentControl: isConsentControlOf(el),
+    isWarning: isWarningOf(el),
+    isAd: isAdLike(el),
+    isStickyPromo: isStickyOrFixed(el) || isPopupLike(el),
+    isAutoplayMedia: isAutoplayMediaOf(el),
+    isRepeatedLink: !!opts.repeatedLink,
+    visible: true,
+    boundingBox: boundingBoxOf(el),
   }
 }
 
@@ -197,17 +261,15 @@ export function extractPage(): ExtractionResult {
   const counter = { n: nextIdCounter() }
 
   document.querySelectorAll(CANDIDATE_SELECTOR).forEach((el) => {
-    if (seen.has(el) || !isVisible(el)) return
-    const elementType = categorize(el)
-    if (!elementType) return
+    if (seen.has(el) || !isVisible(el) || !isExtractable(el)) return
     seen.add(el)
-    blocks.push(buildBlock(el, elementType, counter))
+    blocks.push(buildBlock(el, counter))
   })
 
   findLinkGroups().forEach((el) => {
     if (seen.has(el) || !isVisible(el)) return
     seen.add(el)
-    blocks.push(buildBlock(el, 'link-group', counter))
+    blocks.push(buildBlock(el, counter, { repeatedLink: true }))
   })
 
   return {
