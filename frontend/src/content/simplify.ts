@@ -373,19 +373,14 @@ function isProgressiveRevealActive(): boolean {
   return sections.length > 0
 }
 
-// Cumulative reveal: everything up through currentSectionIndex stays fully visible
-// (so Prev/Next never yanks away content the reader has already reached), the section
-// right after it previews dimmed, and everything further out stays collapsed.
+// Block-by-block reveal: only the current section is visible. Every other
+// section — before or after — is fully hidden, not faded or peeking.
 function applySectionVisibility(): void {
   sections.forEach((group, index) => {
     group.forEach((el) => {
       saveOriginal(el)
       el.classList.remove(DEEMPHASIZE_CLASS, SECTION_HIDDEN_CLASS)
-      if (index <= currentSectionIndex) {
-        // already revealed: no extra class, full clarity
-      } else if (index === currentSectionIndex + 1) {
-        el.classList.add(DEEMPHASIZE_CLASS)
-      } else {
+      if (index !== currentSectionIndex) {
         el.classList.add(SECTION_HIDDEN_CLASS)
       }
     })
@@ -396,7 +391,7 @@ function updateProgressiveControls(): void {
   const bar = document.getElementById(PROGRESSIVE_CONTROLS_ID)
   if (!bar) return
   const label = bar.querySelector('[data-role="label"]')
-  if (label) label.textContent = `Showing ${currentSectionIndex + 1} of ${sections.length} sections`
+  if (label) label.textContent = `Section ${currentSectionIndex + 1} of ${sections.length}`
   const prevBtn = bar.querySelector<HTMLButtonElement>('[data-role="prev"]')
   const nextBtn = bar.querySelector<HTMLButtonElement>('[data-role="next"]')
   if (prevBtn) prevBtn.disabled = currentSectionIndex === 0
