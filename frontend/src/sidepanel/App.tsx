@@ -1,17 +1,29 @@
 import { useEffect, useState } from 'react'
-import type { ExtractionResult } from '../types/page'
+import {
+  Eye,
+  EyeOff,
+  Palette,
+  Rows3,
+  ScanEye,
+  SlidersHorizontal,
+  Sparkles,
+  User,
+  Waves,
+} from 'lucide-react'
+import ToggleSwitch from './ToggleSwitch'
 
 async function getActiveTabId(): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   return tab?.id ?? null
 }
 
+const EXTENSION_VERSION = chrome.runtime.getManifest().version
+
 function App() {
-  const [status, setStatus] = useState<string>('')
-  const [result, setResult] = useState<ExtractionResult | null>(null)
   const [simplified, setSimplified] = useState(false)
   const [colorReductionAvailable, setColorReductionAvailable] = useState(false)
   const [colorReductionActive, setColorReductionActive] = useState(false)
+  const [error, setError] = useState<string>('')
 
   async function refreshStatus() {
     try {
@@ -36,47 +48,12 @@ function App() {
     refreshStatus()
   }, [])
 
-  async function pingActiveTab() {
-    setStatus('Pinging content script...')
-    setResult(null)
-    try {
-      const tabId = await getActiveTabId()
-      if (!tabId) {
-        setStatus('No active tab found')
-        return
-      }
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_PING' })
-      setStatus(`Content script responded: ${JSON.stringify(response)}`)
-    } catch (err) {
-      setStatus(`No response (content script not loaded on this page): ${String(err)}`)
-    }
-  }
-
-  async function extractPage() {
-    setStatus('Extracting page structure...')
-    setResult(null)
-    try {
-      const tabId = await getActiveTabId()
-      if (!tabId) {
-        setStatus('No active tab found')
-        return
-      }
-      const response = (await chrome.tabs.sendMessage(tabId, {
-        type: 'DISTILL_EXTRACT',
-      })) as ExtractionResult
-      setStatus(`Extracted ${response.blocks.length} blocks`)
-      setResult(response)
-    } catch (err) {
-      setStatus(`Extraction failed: ${String(err)}`)
-    }
-  }
-
   async function simplifyPage() {
-    setStatus('Simplifying page...')
+    setError('')
     try {
       const tabId = await getActiveTabId()
       if (!tabId) {
-        setStatus('No active tab found')
+        setError('No active tab found')
         return
       }
       const response = (await chrome.tabs.sendMessage(tabId, {
@@ -84,39 +61,17 @@ function App() {
       })) as { primaryFound: boolean; deemphasizedCount: number }
       setSimplified(true)
       setColorReductionAvailable(response.primaryFound)
-      setStatus(
-        response.primaryFound
-          ? `Simplified. Main content detected, ${response.deemphasizedCount} clutter elements deemphasized.`
-          : `Simplified. No <main>/<article> found, ${response.deemphasizedCount} clutter elements deemphasized.`,
-      )
     } catch (err) {
-      setStatus(`Simplification failed: ${String(err)}`)
-    }
-  }
-
-  async function restorePage() {
-    setStatus('Restoring original page...')
-    try {
-      const tabId = await getActiveTabId()
-      if (!tabId) {
-        setStatus('No active tab found')
-        return
-      }
-      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_RESTORE' })
-      setSimplified(false)
-      setColorReductionAvailable(false)
-      setColorReductionActive(false)
-      setStatus('Original page restored.')
-    } catch (err) {
-      setStatus(`Restore failed: ${String(err)}`)
+      setError(`Couldn't simplify this page: ${String(err)}`)
     }
   }
 
   async function toggleColorReduction(enabled: boolean) {
+    setError('')
     try {
       const tabId = await getActiveTabId()
       if (!tabId) {
-        setStatus('No active tab found')
+        setError('No active tab found')
         return
       }
       const response = (await chrome.tabs.sendMessage(tabId, {
@@ -124,116 +79,136 @@ function App() {
         enabled,
       })) as { applied: boolean; active: boolean }
       setColorReductionActive(response.active)
-      if (!response.applied) {
-        setStatus('Could not toggle color reduction — simplify the page first.')
-      }
     } catch (err) {
-      setStatus(`Color reduction toggle failed: ${String(err)}`)
+      setError(`Couldn't toggle color reduction: ${String(err)}`)
     }
   }
 
-  const counts = result
-    ? result.blocks.reduce<Record<string, number>>((acc, block) => {
-        acc[block.elementType] = (acc[block.elementType] || 0) + 1
-        return acc
-      }, {})
-    : null
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <h1 style={{ fontSize: 18, margin: 0 }}>Distill</h1>
-      <p style={{ fontSize: 13, color: '#555', margin: 0 }}>Extension scaffold running.</p>
-
-      {simplified && (
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: '#2e7d32',
-            background: '#e8f5e9',
-            padding: '6px 10px',
-            borderRadius: 6,
-          }}
-        >
-          Local simplification mode
+    <div className="flex min-h-screen flex-col gap-4 bg-[#0b0e1a] p-4 text-white">
+      <header className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/20 text-indigo-400">
+            <ScanEye size={14} />
+          </span>
+          <span className="font-semibold">Distill</span>
         </div>
-      )}
+        <ToggleSwitch checked={true} />
+      </header>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={simplifyPage} style={{ padding: '6px 12px' }} disabled={simplified}>
-          Simplify page (local)
-        </button>
-        <button onClick={restorePage} style={{ padding: '6px 12px' }} disabled={!simplified}>
-          Show original page
-        </button>
-      </div>
-
-      <label
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 13,
-          opacity: colorReductionAvailable ? 1 : 0.5,
-        }}
+      <div
+        className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+          simplified
+            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+            : 'border-slate-700 bg-slate-800/60 text-slate-400'
+        }`}
       >
-        <input
-          type="checkbox"
-          checked={colorReductionActive}
-          disabled={!colorReductionAvailable}
-          onChange={(e) => toggleColorReduction(e.target.checked)}
-        />
-        Reduce color variation
-      </label>
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={pingActiveTab} style={{ padding: '6px 12px' }}>
-          Ping content script
-        </button>
-        <button onClick={extractPage} style={{ padding: '6px 12px' }}>
-          Extract page structure
-        </button>
+        <span className={`h-1.5 w-1.5 rounded-full ${simplified ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+        {simplified ? 'Local processing active' : 'Local processing idle'}
       </div>
 
-      {status && <p style={{ fontSize: 12, wordBreak: 'break-word', margin: 0 }}>{status}</p>}
+      <button
+        type="button"
+        onClick={simplifyPage}
+        className="flex items-center justify-center gap-2 rounded-xl bg-indigo-500 py-2.5 font-medium text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-indigo-400"
+      >
+        <Sparkles size={16} />
+        Simplify Current Page
+      </button>
 
-      {result && (
-        <div style={{ fontSize: 12 }}>
-          {result.hasSensitiveForms && (
-            <p style={{ color: '#b00020', fontWeight: 600 }}>
-              ⚠ Sensitive form detected (password/payment) — this page will be excluded from
-              backend requests.
-            </p>
-          )}
-          {counts && (
-            <ul style={{ paddingLeft: 16, margin: '4px 0' }}>
-              {Object.entries(counts)
-                .sort((a, b) => b[1] - a[1])
-                .map(([type, count]) => (
-                  <li key={type}>
-                    {type}: {count}
-                  </li>
-                ))}
-            </ul>
-          )}
-          <details>
-            <summary style={{ cursor: 'pointer' }}>Raw blocks JSON</summary>
-            <pre
-              style={{
-                maxHeight: 300,
-                overflow: 'auto',
-                background: '#eee',
-                padding: 8,
-                fontSize: 11,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {JSON.stringify(result.blocks, null, 2)}
-            </pre>
-          </details>
+      <button
+        type="button"
+        className="flex items-center justify-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/60 py-2.5 font-medium text-slate-200 transition-colors hover:bg-slate-800"
+      >
+        <SlidersHorizontal size={16} />
+        View Settings
+      </button>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-300">
+          <User size={13} />
+        </span>
+        <div>
+          <p className="text-sm font-medium">Default Profile</p>
+          <p className="mt-0.5 text-xs text-slate-400">Spacing: +40% • Text: 1.15x • High Contrast</p>
         </div>
-      )}
+      </div>
+
+      <p className="mt-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+        Simplification controls
+      </p>
+
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">Intensity</span>
+          <span className="text-xs text-slate-400">50%</span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+          <div className="h-full w-1/2 rounded-full bg-indigo-400" />
+        </div>
+      </div>
+
+      <div className="flex flex-col divide-y divide-slate-800/60 rounded-xl border border-slate-800 bg-slate-900/60 px-3">
+        <div className="flex items-center justify-between py-2.5">
+          <span className="flex items-center gap-2 text-sm font-medium text-amber-400">
+            <Waves size={15} />
+            Reduce motion
+          </span>
+          <ToggleSwitch checked={true} />
+        </div>
+        <div className="flex items-center justify-between py-2.5">
+          <span className="flex items-center gap-2 text-sm font-medium text-amber-400">
+            <Rows3 size={15} />
+            Increase spacing
+          </span>
+          <ToggleSwitch checked={true} />
+        </div>
+        <div className="flex items-center justify-between py-2.5">
+          <span className="flex items-center gap-2 text-sm font-medium text-amber-400">
+            <Eye size={15} />
+            Progressive reveal
+          </span>
+          <ToggleSwitch checked={true} />
+        </div>
+        <div className="flex items-center justify-between py-2.5">
+          <span
+            className={`flex items-center gap-2 text-sm font-medium ${
+              colorReductionAvailable ? 'text-amber-400' : 'text-amber-400/40'
+            }`}
+          >
+            <Palette size={15} />
+            Reduce color variation
+          </span>
+          <ToggleSwitch
+            checked={colorReductionActive}
+            disabled={!colorReductionAvailable}
+            onChange={toggleColorReduction}
+          />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        className="mx-auto flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-slate-300"
+      >
+        <EyeOff size={13} />
+        Show everything temporarily
+      </button>
+
+      <footer className="mt-auto flex flex-col items-center gap-1 border-t border-slate-800 pt-3">
+        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          <button type="button" className="hover:text-slate-300">
+            Privacy
+          </button>
+          <span>·</span>
+          <button type="button" className="hover:text-slate-300">
+            Feedback
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-600">Distill v{EXTENSION_VERSION}</p>
+      </footer>
     </div>
   )
 }
