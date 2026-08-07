@@ -1,5 +1,14 @@
 import type { BoundingBox, ExtractionResult, Landmark, PageBlock } from '../types/page'
-import { classNameString, isAdLike, isPopupLike, isSidebarLike, isStickyOrFixed, isVisible } from './dom-heuristics'
+import {
+  isAdLike,
+  isConsentControlLike,
+  isPopupLike,
+  isSidebarLike,
+  isStickyOrFixed,
+  isVisible,
+  isWarningLike,
+  PAYMENT_FIELD_PATTERN,
+} from './dom-heuristics'
 
 export const FF_ID_ATTR = 'data-distill-id'
 
@@ -21,9 +30,6 @@ const CANDIDATE_SELECTOR = [
 ].join(',')
 
 const VIDEO_EMBED_PATTERN = /youtube|vimeo|player/i
-const PAYMENT_FIELD_PATTERN = /card.?number|cvv|cvc|expir|credit.?card/i
-const CONSENT_PATTERN = /consent|cookie|gdpr|accept all|reject all|manage preferences/i
-const WARNING_PATTERN = /warning|error|alert/i
 
 function isExtractable(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
@@ -133,19 +139,6 @@ function isPaymentFieldOf(el: Element): boolean {
   return PAYMENT_FIELD_PATTERN.test(hay)
 }
 
-function isConsentControlOf(el: Element): boolean {
-  if (!isInteractiveOf(el)) return false
-  const hay = [el.textContent, el.getAttribute('aria-label'), classNameString(el)].filter(Boolean).join(' ')
-  return CONSENT_PATTERN.test(hay)
-}
-
-function isWarningOf(el: Element): boolean {
-  const role = el.getAttribute('role')
-  if (role === 'alert' || role === 'alertdialog') return true
-  if (el.getAttribute('aria-live') === 'assertive') return true
-  return WARNING_PATTERN.test(classNameString(el))
-}
-
 function isAutoplayMediaOf(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
   if ((tag === 'video' || tag === 'audio') && (el as HTMLMediaElement).autoplay) return true
@@ -244,8 +237,8 @@ function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: 
     isFormInstruction: isFormInstructionOf(el),
     isPasswordField: isPasswordFieldOf(el),
     isPaymentField: isPaymentFieldOf(el),
-    isConsentControl: isConsentControlOf(el),
-    isWarning: isWarningOf(el),
+    isConsentControl: isConsentControlLike(el),
+    isWarning: isWarningLike(el),
     isAd: isAdLike(el),
     isStickyPromo: isStickyOrFixed(el) || isPopupLike(el),
     isAutoplayMedia: isAutoplayMediaOf(el),

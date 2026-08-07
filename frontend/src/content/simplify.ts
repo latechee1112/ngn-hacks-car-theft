@@ -1,4 +1,4 @@
-import { isAdLike, isPopupLike, isStickyOrFixed, isVisible } from './dom-heuristics'
+import { isAdLike, isPopupLike, isProtectedFromSimplification, isStickyOrFixed, isVisible } from './dom-heuristics'
 import { restoreAllOriginal, saveOriginal } from './originalState'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
@@ -50,6 +50,7 @@ function collectNoiseTargets(primary: Element | null): Element[] {
   document.querySelectorAll(NOISE_SELECTOR).forEach((el) => {
     if (primary && (primary === el || primary.contains(el))) return
     if (!isVisible(el)) return
+    if (isProtectedFromSimplification(el)) return
     if (isAdLike(el) || isPopupLike(el) || ['nav', 'aside', 'footer'].includes(el.tagName.toLowerCase())) {
       targets.add(el)
       return
@@ -58,12 +59,15 @@ function collectNoiseTargets(primary: Element | null): Element[] {
     if (role === 'navigation' || role === 'complementary' || role === 'contentinfo') targets.add(el)
   })
 
-  // Sticky/fixed chrome (cookie banners, sticky headers) often isn't caught by the
-  // selector above, so do a bounded pass over top-level containers by computed style.
+  // Sticky/fixed chrome (promo bars, sticky headers) often isn't caught by the selector
+  // above, so do a bounded pass over top-level containers by computed style. Safety-critical
+  // fixed chrome — cookie/consent banners, warnings — must be excluded here specifically,
+  // since "sticky/fixed" is exactly the shape a consent banner normally takes.
   document.querySelectorAll('body > *, header, div, section').forEach((el) => {
     if (targets.has(el)) return
     if (primary && (primary === el || primary.contains(el))) return
     if (!isVisible(el)) return
+    if (isProtectedFromSimplification(el)) return
     if (isStickyOrFixed(el)) targets.add(el)
   })
 

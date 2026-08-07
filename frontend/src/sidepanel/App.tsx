@@ -68,6 +68,25 @@ function App() {
     }
   }
 
+  async function restorePage() {
+    setError('')
+    try {
+      const tabId = await getActiveTabId()
+      if (!tabId) {
+        setError('No active tab found')
+        return
+      }
+      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_RESTORE' })
+      setSimplified(false)
+      setColorReductionAvailable(false)
+      setColorReductionActive(false)
+      setProgressiveRevealAvailable(false)
+      setProgressiveRevealActive(false)
+    } catch (err) {
+      setError(`Couldn't restore this page: ${String(err)}`)
+    }
+  }
+
   async function toggleColorReduction(enabled: boolean) {
     setError('')
     try {
