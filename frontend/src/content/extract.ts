@@ -1,4 +1,5 @@
 import type { ElementType, ExtractionResult, PageBlock, PageBlockPosition } from '../types/page'
+import { isAdLike, isPopupLike, isSidebarLike, isVisible } from './dom-heuristics'
 
 export const FF_ID_ATTR = 'data-focusfit-id'
 
@@ -19,35 +20,17 @@ const CANDIDATE_SELECTOR = [
   '[class*="sidebar" i]', '[id*="sidebar" i]',
 ].join(',')
 
-const AD_PATTERN = /(^|[-_ ])ad([-_ ]|$)|advert|sponsor|adsbygoogle/i
-const POPUP_PATTERN = /modal|popup|overlay|lightbox/i
-const SIDEBAR_PATTERN = /sidebar/i
 const VIDEO_EMBED_PATTERN = /youtube|vimeo|player/i
 const PAYMENT_FIELD_PATTERN = /card.?number|cvv|cvc|expir|credit.?card/i
-
-function classNameString(el: Element): string {
-  const raw = typeof el.className === 'string' ? el.className : ''
-  return `${raw} ${el.id || ''}`
-}
-
-function isVisible(el: Element): boolean {
-  const htmlEl = el as HTMLElement
-  if (htmlEl.hidden) return false
-  const rect = el.getBoundingClientRect()
-  if (rect.width === 0 && rect.height === 0) return false
-  const cs = getComputedStyle(el)
-  return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0'
-}
 
 function categorize(el: Element): ElementType | null {
   const tag = el.tagName.toLowerCase()
   const role = el.getAttribute('role')
-  const cls = classNameString(el)
 
-  if (POPUP_PATTERN.test(cls) || role === 'dialog' || el.getAttribute('aria-modal') === 'true') return 'popup'
-  if (AD_PATTERN.test(cls) || (tag === 'ins' && cls.includes('adsbygoogle'))) return 'ad'
+  if (isPopupLike(el)) return 'popup'
+  if (isAdLike(el)) return 'ad'
   if (tag === 'nav' || role === 'navigation') return 'nav'
-  if (tag === 'aside' || SIDEBAR_PATTERN.test(cls) || role === 'complementary') return 'sidebar'
+  if (isSidebarLike(el)) return 'sidebar'
   if (tag === 'article') return 'article'
   if (/^h[1-6]$/.test(tag)) return 'heading'
   if (tag === 'form') return 'form'
