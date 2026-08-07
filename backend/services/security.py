@@ -28,7 +28,7 @@ def sanitize_text(text: str, max_length: int) -> str:
 
 def sanitize_blocks(blocks: List[PageBlock], settings: Settings) -> List[PageBlock]:
     for block in blocks:
-        block.text_preview = sanitize_text(block.text_preview, settings.max_block_text_length)
+        block.text = sanitize_text(block.text, settings.max_block_text_length)
     return blocks
 
 

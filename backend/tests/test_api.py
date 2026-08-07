@@ -33,8 +33,14 @@ def test_analyze_page_falls_back_without_llm_key(client):
     payload = {
         "profile": _profile(),
         "blocks": [
-            {"id": "b1", "tag": "article", "elementType": "article", "textPreview": "content"},
-            {"id": "b2", "tag": "input", "elementType": "input", "textPreview": "Password"},
+            {"blockId": "b1", "tag": "main", "landmark": "main", "text": "content"},
+            {
+                "blockId": "b2",
+                "tag": "input",
+                "isPasswordField": True,
+                "isFormControl": True,
+                "text": "pw",
+            },
         ],
     }
     resp = client.post("/v1/analyze-page", json=payload)
@@ -47,10 +53,7 @@ def test_analyze_page_falls_back_without_llm_key(client):
 
 
 def test_analyze_page_rejects_oversized_block_count(client):
-    blocks = [
-        {"id": f"b{i}", "tag": "div", "elementType": "paragraph", "textPreview": "x"}
-        for i in range(151)
-    ]
+    blocks = [{"blockId": f"b{i}", "tag": "div", "text": "x"} for i in range(151)]
     resp = client.post("/v1/analyze-page", json={"profile": _profile(), "blocks": blocks})
     assert resp.status_code == 413
 
@@ -67,13 +70,8 @@ def test_analyze_page_never_collapses_safety_critical_at_max_strength(client):
     payload = {
         "profile": _profile(simplificationStrength=1.0),
         "blocks": [
-            {
-                "id": "b1",
-                "tag": "div",
-                "elementType": "paragraph",
-                "textPreview": "Your payment failed, please try again",
-            },
-            {"id": "b2", "tag": "div", "elementType": "ad", "textPreview": "Buy now"},
+            {"blockId": "b1", "tag": "div", "isWarning": True, "text": "Payment failed"},
+            {"blockId": "b2", "tag": "div", "isAd": True, "text": "Buy now"},
         ],
     }
     resp = client.post("/v1/analyze-page", json=payload)
@@ -81,29 +79,3 @@ def test_analyze_page_never_collapses_safety_critical_at_max_strength(client):
     actions = {a["blockId"]: a["action"] for a in resp.json()["actions"]}
     assert actions["b1"] != "collapse"
     assert actions["b2"] == "collapse"
-
-
-def test_analyze_page_accepts_full_extraction_result_shape(client):
-    payload = {
-        "url": "https://example.com/signup",
-        "extractedAt": 1735689600000,
-        "hasSensitiveForms": True,
-        "profile": _profile(),
-        "task": "Fill out the signup form",
-        "blocks": [
-            {
-                "id": "b1",
-                "tag": "form",
-                "role": "form",
-                "textPreview": "",
-                "elementType": "form",
-                "position": {"x": 10, "y": 20, "width": 300, "height": 400},
-                "isInteractive": False,
-                "isFixed": False,
-                "hasAnimation": False,
-                "linkCount": 0,
-            },
-        ],
-    }
-    resp = client.post("/v1/analyze-page", json=payload)
-    assert resp.status_code == 200

@@ -5,26 +5,12 @@ safety net: it always produces a valid result, so the API can degrade to
 it whenever the LLM is unavailable or returns something invalid.
 """
 
-from models.common import ActionType, ClassificationLabel, ElementType, PageBlock
+from models.common import ActionType, ClassificationLabel, PageBlock
 from models.profile import VisualProfile
 
-_ESSENTIAL_TYPES = {ElementType.ARTICLE}
-_SUPPORTING_TYPES = {
-    ElementType.HEADING,
-    ElementType.PARAGRAPH,
-    ElementType.SECTION,
-    ElementType.FORM,
-    ElementType.INPUT,
-    ElementType.BUTTON,
-}
-_DISTRACTING_TYPES = {
-    ElementType.NAV,
-    ElementType.SIDEBAR,
-    ElementType.AD,
-    ElementType.POPUP,
-    ElementType.STICKY,
-    ElementType.LINK_GROUP,
-}
+_MAIN_LANDMARKS = {"main", "article"}
+_LOW_RELEVANCE_LANDMARKS = {"nav", "aside", "footer"}
+_LOW_RELEVANCE_TAGS = {"nav", "aside", "footer"}
 
 _COLLAPSE_STRENGTH_THRESHOLD = 0.6
 
@@ -43,16 +29,27 @@ def classify_block(block: PageBlock) -> ClassificationLabel:
     if block.is_safety_critical():
         return ClassificationLabel.SAFETY_CRITICAL
 
-    if block.element_type in _ESSENTIAL_TYPES:
-        return ClassificationLabel.ESSENTIAL
-
-    if block.element_type in _DISTRACTING_TYPES:
-        return ClassificationLabel.DISTRACTING
-
-    if block.element_type in _SUPPORTING_TYPES:
+    if block.is_form_instruction:
         return ClassificationLabel.SUPPORTING
 
-    # image, video, other - no strong structural signal either way
+    landmark = (block.landmark or "").lower()
+    tag = (block.tag or "").lower()
+
+    if landmark in _MAIN_LANDMARKS:
+        return ClassificationLabel.ESSENTIAL
+
+    if tag.startswith("h") and tag[1:].isdigit() and landmark in _MAIN_LANDMARKS | {""}:
+        return ClassificationLabel.SUPPORTING
+
+    if block.is_ad or block.is_sticky_promo or block.is_autoplay_media or block.is_repeated_link:
+        return ClassificationLabel.DISTRACTING
+
+    if landmark in _LOW_RELEVANCE_LANDMARKS or tag in _LOW_RELEVANCE_TAGS:
+        return ClassificationLabel.DISTRACTING
+
+    if block.is_interactive or block.is_form_control:
+        return ClassificationLabel.SUPPORTING
+
     return ClassificationLabel.UNCERTAIN
 
 
@@ -95,7 +92,7 @@ def fallback_action(block: PageBlock, profile: VisualProfile):
     action = action_for_category(category, block, profile)
     priority = _PRIORITY_BY_CATEGORY[category]
     return BlockAction(
-        blockId=block.id,
+        blockId=block.block_id,
         action=action,
         priority=priority,
         reason=reason_for_category(category),

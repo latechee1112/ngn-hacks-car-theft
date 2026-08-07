@@ -29,7 +29,7 @@ def make_profile():
 
 
 def make_blocks():
-    return [PageBlock(id="b1", tag="div", elementType="paragraph", textPreview="hello")]
+    return [PageBlock(blockId="b1", tag="div", text="hello")]
 
 
 def _mock_completion(content):

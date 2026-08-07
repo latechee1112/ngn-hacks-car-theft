@@ -1,4 +1,3 @@
-import re
 from enum import Enum
 from typing import Optional
 
@@ -20,80 +19,65 @@ class ActionType(str, Enum):
     COLLAPSE = "collapse"
 
 
-class ElementType(str, Enum):
-    """Mirrors frontend/src/types/page.ts::ElementType exactly."""
+class BoundingBox(BaseModel):
+    """Viewport-relative fractions (0-1), not raw pixel/DOM data."""
 
-    HEADING = "heading"
-    PARAGRAPH = "paragraph"
-    ARTICLE = "article"
-    SECTION = "section"
-    NAV = "nav"
-    SIDEBAR = "sidebar"
-    AD = "ad"
-    FORM = "form"
-    INPUT = "input"
-    BUTTON = "button"
-    IMAGE = "image"
-    VIDEO = "video"
-    POPUP = "popup"
-    STICKY = "sticky"
-    LINK_GROUP = "link-group"
-    OTHER = "other"
-
-
-class PageBlockPosition(BaseModel):
-    """Absolute page-pixel coordinates, as produced by getBoundingClientRect()
-    plus scroll offset - not normalized fractions."""
-
-    x: float
-    y: float
-    width: float = Field(ge=0)
-    height: float = Field(ge=0)
-
-
-# Frontend never extracts a structured "is this a password/payment/consent
-# field" flag - only a page-level hasSensitiveForms boolean and each block's
-# label/placeholder text (never its value). This regex is the server-side
-# safety net for per-block protection; the LLM's own contextual reading of
-# textPreview is the primary signal, this just backstops the rule-engine
-# fallback path where there's no LLM to lean on.
-_SENSITIVE_TEXT_RE = re.compile(
-    r"password|passcode|card\s*number|cvv|cvc|expir|payment|billing|"
-    r"consent|agree to|terms|required|invalid|error|must be|must contain",
-    re.IGNORECASE,
-)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(ge=0, le=1)
+    height: float = Field(ge=0, le=1)
 
 
 class PageBlock(BaseModel):
     """Sanitized metadata describing one visible block on the page.
 
-    Mirrors frontend/src/types/page.ts::PageBlock exactly - this is the
-    real DOM-extraction contract, not a speculative one.
+    This is the shared contract with the extension frontend - field names
+    here must stay in sync with whatever the frontend's DOM extractor emits.
+    Unrecognized extra fields are ignored rather than rejected, since the
+    frontend schema may still be evolving.
     """
 
-    model_config = {"populate_by_name": True, "extra": "ignore"}
+    model_config = {"extra": "ignore"}
 
-    id: str = Field(min_length=1, max_length=64)
+    block_id: str = Field(alias="blockId", min_length=1, max_length=64)
     tag: str = Field(max_length=32)
-    role: str = Field(default="", max_length=64)
-    text_preview: str = Field(default="", alias="textPreview", max_length=2000)
-    element_type: ElementType = Field(alias="elementType")
-    position: Optional[PageBlockPosition] = None
+    landmark: Optional[str] = Field(
+        default=None,
+        description="Detected semantic landmark: main, article, nav, aside, header, footer, form, dialog, other",
+    )
+    role: Optional[str] = Field(default=None, max_length=64)
+    text: str = Field(default="", max_length=2000)
+
     is_interactive: bool = Field(default=False, alias="isInteractive")
-    is_fixed: bool = Field(default=False, alias="isFixed")
-    has_animation: bool = Field(default=False, alias="hasAnimation")
-    link_count: int = Field(default=0, alias="linkCount", ge=0)
+    is_form_control: bool = Field(default=False, alias="isFormControl")
+    is_form_instruction: bool = Field(default=False, alias="isFormInstruction")
+    is_password_field: bool = Field(default=False, alias="isPasswordField")
+    is_payment_field: bool = Field(default=False, alias="isPaymentField")
+    is_consent_control: bool = Field(default=False, alias="isConsentControl")
+    is_warning: bool = Field(default=False, alias="isWarning")
+    is_ad: bool = Field(default=False, alias="isAd")
+    is_sticky_promo: bool = Field(default=False, alias="isStickyPromo")
+    is_autoplay_media: bool = Field(default=False, alias="isAutoplayMedia")
+    is_repeated_link: bool = Field(default=False, alias="isRepeatedLink")
+    visible: bool = Field(default=True)
+
+    bounding_box: Optional[BoundingBox] = Field(default=None, alias="boundingBox")
 
     def is_safety_critical(self) -> bool:
-        return bool(self.text_preview) and bool(_SENSITIVE_TEXT_RE.search(self.text_preview))
+        return (
+            self.is_password_field
+            or self.is_payment_field
+            or self.is_consent_control
+            or self.is_warning
+        )
 
     def is_protected_from_collapse(self) -> bool:
-        """Blocks that must never be collapsed/hidden, per spec: visible
-        form controls are never auto-hidden, and anything that reads as
-        safety-critical text is never collapsed either."""
-        if self.element_type in (ElementType.INPUT, ElementType.FORM, ElementType.BUTTON):
-            return True
-        return self.is_safety_critical()
+        """Blocks that must never be collapsed/hidden, per spec."""
+        return (
+            self.is_safety_critical()
+            or self.is_form_instruction
+            or (self.is_form_control and self.visible)
+        )
 
 
 class BlockAction(BaseModel):

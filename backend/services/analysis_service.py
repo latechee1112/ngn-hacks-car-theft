@@ -44,7 +44,7 @@ def analyze(
         warnings.append("Used rule-based fallback classification (LLM unavailable or invalid).")
         actions = rule_engine.fallback_actions(blocks, profile)
 
-    blocks_by_id = {b.id: b for b in blocks}
+    blocks_by_id = {b.block_id: b for b in blocks}
     summary = _summarize(actions, blocks_by_id)
 
     layout = LayoutSettings(

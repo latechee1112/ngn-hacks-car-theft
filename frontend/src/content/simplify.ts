@@ -1,7 +1,10 @@
+import type { BlockAction, LayoutSettings } from '../types/analysis'
 import { isAdLike, isPopupLike, isProtectedFromSimplification, isStickyOrFixed, isVisible } from './dom-heuristics'
+import { FF_ID_ATTR } from './extract'
 import { restoreAllOriginal, saveOriginal } from './originalState'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
+const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
 const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
@@ -95,13 +98,15 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} {
   max-width: 760px !important;
   margin-left: auto !important;
   margin-right: auto !important;
-  font-size: 1.15em !important;
+  font-size: calc(1em * var(--distill-text-scale, 1.15)) !important;
   line-height: 1.75 !important;
   float: none !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} p,
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} li {
-  margin-bottom: 1.1em !important;
+  /* em, relative to the container's already-scaled font-size above - not an
+     independent multiply, or textScale would compound quadratically. */
+  margin-bottom: calc(1.1em * var(--distill-spacing, 1)) !important;
   font-size: 1.05em !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} h1,
@@ -202,6 +207,14 @@ html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
   opacity: 0.9;
   white-space: nowrap;
 }
+html[${SIMPLIFIED_ATTR}][${REDUCE_MOTION_ATTR}] *,
+html[${SIMPLIFIED_ATTR}][${REDUCE_MOTION_ATTR}] *::before,
+html[${SIMPLIFIED_ATTR}][${REDUCE_MOTION_ATTR}] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
 `
   document.head.appendChild(style)
 }
@@ -248,6 +261,68 @@ export function applySimplification(): SimplifyResult {
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
 
   return { primaryFound: !!primary, deemphasizedCount: targets.length }
+}
+
+function findByBlockId(blockId: string): Element | null {
+  return document.querySelector(`[${FF_ID_ATTR}="${CSS.escape(blockId)}"]`)
+}
+
+// Renders the backend's transformation instructions - the backend never sends HTML/CSS/JS,
+// only {blockId, action, priority, reason} per block plus page-wide layout numbers, so this
+// is the only place that ever turns those instructions into actual DOM changes. Reuses the
+// exact same saveOriginal()/class-toggle machinery as the local heuristic, so restoreOriginalPage()
+// undoes either path identically.
+export function applyBackendActions(actions: BlockAction[], layout: LayoutSettings): SimplifyResult {
+  if (isSimplificationActive()) {
+    return {
+      primaryFound: !!document.querySelector(`.${PRIMARY_CLASS}`),
+      deemphasizedCount: document.querySelectorAll(`.${DEEMPHASIZE_CLASS}`).length,
+    }
+  }
+
+  let primaryFound = false
+  let deemphasizedCount = 0
+
+  actions.forEach((action) => {
+    const el = findByBlockId(action.blockId)
+    if (!el) return
+    saveOriginal(el)
+
+    switch (action.action) {
+      case 'emphasize':
+        el.classList.add(PRIMARY_CLASS)
+        primaryFound = true
+        break
+      case 'deemphasize':
+        el.classList.add(DEEMPHASIZE_CLASS)
+        if (isStickyOrFixed(el)) el.classList.add(UNSTICK_CLASS)
+        deemphasizedCount++
+        break
+      case 'collapse':
+        // Reuses the progressive-reveal "hidden" class - display:none, but still
+        // present in the DOM and fully restorable, never deleted.
+        el.classList.add(SECTION_HIDDEN_CLASS)
+        break
+      case 'keep':
+      default:
+        break
+    }
+  })
+
+  document.documentElement.style.setProperty('--distill-text-scale', String(layout.textScale))
+  document.documentElement.style.setProperty('--distill-spacing', String(layout.spacingMultiplier))
+  document.documentElement.toggleAttribute(REDUCE_MOTION_ATTR, layout.reduceMotion)
+
+  pauseAutoplayMedia()
+  injectGlobalStyle()
+  ensureRestoreButton()
+  document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
+
+  if (layout.progressiveReveal && primaryFound) {
+    enableProgressiveReveal()
+  }
+
+  return { primaryFound, deemphasizedCount }
 }
 
 function getPrimaryElement(): Element | null {
@@ -498,6 +573,9 @@ export function restoreOriginalPage(): void {
   disableProgressiveReveal()
   restoreAllOriginal()
   document.documentElement.removeAttribute(SIMPLIFIED_ATTR)
+  document.documentElement.removeAttribute(REDUCE_MOTION_ATTR)
+  document.documentElement.style.removeProperty('--distill-text-scale')
+  document.documentElement.style.removeProperty('--distill-spacing')
   document.getElementById(STYLE_TAG_ID)?.remove()
   document.getElementById(RESTORE_BTN_ID)?.remove()
 }
