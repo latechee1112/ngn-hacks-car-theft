@@ -134,37 +134,42 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):
 }
 #${RESTORE_BTN_ID} {
   position: fixed;
-  bottom: 16px;
-  right: 16px;
+  bottom: 20px;
+  right: 20px;
   z-index: 2147483647;
   background: #1a1a1a;
   color: #fff;
-  border: none;
+  border: 2px solid transparent;
   border-radius: 999px;
-  padding: 10px 18px;
-  font: 600 13px system-ui, sans-serif;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  padding: 14px 24px;
+  min-height: 48px;
+  font: 700 16px system-ui, sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
 #${RESTORE_BTN_ID}:hover {
-  opacity: 0.9;
+  background: #333;
+}
+#${RESTORE_BTN_ID}:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
 }
 html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
   display: none !important;
 }
 #${PROGRESSIVE_CONTROLS_ID} {
   position: fixed;
-  bottom: 20px;
-  left: 20px;
+  bottom: 18px;
+  left: 18px;
   z-index: 2147483647;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   background: #1a1a1a;
   color: #fff;
-  border-radius: 16px;
-  padding: 14px 20px;
-  font: 700 17px/1.3 system-ui, sans-serif;
+  border-radius: 14px;
+  padding: 11px 16px;
+  font: 700 15px/1.3 system-ui, sans-serif;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #${PROGRESSIVE_CONTROLS_ID} button {
@@ -173,10 +178,10 @@ html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
   color: inherit;
   font: inherit;
   cursor: pointer;
-  padding: 12px 20px;
-  min-height: 48px;
-  min-width: 48px;
-  border-radius: 10px;
+  padding: 9px 15px;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 9px;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:disabled {
   opacity: 0.35;
