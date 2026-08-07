@@ -154,36 +154,43 @@ html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
 }
 #${PROGRESSIVE_CONTROLS_ID} {
   position: fixed;
-  bottom: 16px;
-  left: 16px;
+  bottom: 20px;
+  left: 20px;
   z-index: 2147483647;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
   background: #1a1a1a;
   color: #fff;
-  border-radius: 999px;
-  padding: 8px 14px;
-  font: 600 13px system-ui, sans-serif;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  border-radius: 16px;
+  padding: 14px 20px;
+  font: 700 17px/1.3 system-ui, sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #${PROGRESSIVE_CONTROLS_ID} button {
-  background: transparent;
-  border: none;
+  background: #333;
+  border: 2px solid transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 12px 20px;
+  min-height: 48px;
+  min-width: 48px;
+  border-radius: 10px;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:disabled {
   opacity: 0.35;
   cursor: default;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:hover:not(:disabled) {
-  opacity: 0.8;
+  background: #4a4a4a;
+}
+#${PROGRESSIVE_CONTROLS_ID} button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
 }
 #${PROGRESSIVE_CONTROLS_ID} [data-role="label"] {
-  opacity: 0.8;
+  opacity: 0.9;
   white-space: nowrap;
 }
 `
@@ -361,13 +368,16 @@ function isProgressiveRevealActive(): boolean {
   return sections.length > 0
 }
 
+// Cumulative reveal: everything up through currentSectionIndex stays fully visible
+// (so Prev/Next never yanks away content the reader has already reached), the section
+// right after it previews dimmed, and everything further out stays collapsed.
 function applySectionVisibility(): void {
   sections.forEach((group, index) => {
     group.forEach((el) => {
       saveOriginal(el)
       el.classList.remove(DEEMPHASIZE_CLASS, SECTION_HIDDEN_CLASS)
-      if (index === currentSectionIndex) {
-        // current section: no extra class, full clarity
+      if (index <= currentSectionIndex) {
+        // already revealed: no extra class, full clarity
       } else if (index === currentSectionIndex + 1) {
         el.classList.add(DEEMPHASIZE_CLASS)
       } else {
@@ -381,7 +391,7 @@ function updateProgressiveControls(): void {
   const bar = document.getElementById(PROGRESSIVE_CONTROLS_ID)
   if (!bar) return
   const label = bar.querySelector('[data-role="label"]')
-  if (label) label.textContent = `Section ${currentSectionIndex + 1} of ${sections.length}`
+  if (label) label.textContent = `Showing ${currentSectionIndex + 1} of ${sections.length} sections`
   const prevBtn = bar.querySelector<HTMLButtonElement>('[data-role="prev"]')
   const nextBtn = bar.querySelector<HTMLButtonElement>('[data-role="next"]')
   if (prevBtn) prevBtn.disabled = currentSectionIndex === 0
@@ -405,26 +415,32 @@ function ensureProgressiveControls(): void {
   }
   const bar = document.createElement('div')
   bar.id = PROGRESSIVE_CONTROLS_ID
+  bar.setAttribute('role', 'group')
+  bar.setAttribute('aria-label', 'Progressive reveal navigation')
 
   const prevBtn = document.createElement('button')
   prevBtn.type = 'button'
   prevBtn.dataset.role = 'prev'
-  prevBtn.textContent = '‹ Prev'
+  prevBtn.textContent = '‹ Previous'
+  prevBtn.setAttribute('aria-label', 'Show previous section')
   prevBtn.addEventListener('click', () => goToSection(currentSectionIndex - 1))
 
   const label = document.createElement('span')
   label.dataset.role = 'label'
+  label.setAttribute('aria-live', 'polite')
 
   const nextBtn = document.createElement('button')
   nextBtn.type = 'button'
   nextBtn.dataset.role = 'next'
   nextBtn.textContent = 'Next ›'
+  nextBtn.setAttribute('aria-label', 'Show next section')
   nextBtn.addEventListener('click', () => goToSection(currentSectionIndex + 1))
 
   const showAllBtn = document.createElement('button')
   showAllBtn.type = 'button'
   showAllBtn.dataset.role = 'show-all'
   showAllBtn.textContent = 'Show All'
+  showAllBtn.setAttribute('aria-label', 'Show all sections')
   showAllBtn.addEventListener('click', disableProgressiveReveal)
 
   bar.append(prevBtn, label, nextBtn, showAllBtn)
