@@ -1,2 +1,11 @@
 fastapi
 uvicorn[standard]
+pydantic>=2.9.0
+pydantic-settings
+openai
+python-dotenv
+slowapi
+httpx
+pytest
+pytest-mock
+pytest-asyncio
