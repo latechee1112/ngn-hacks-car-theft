@@ -14,10 +14,10 @@
 
   /* Single accent. Reserved for the primary action and the active
      processing state — never used decoratively. */
-  --color-accent: #2f7d55;
-  --color-accent-hover: #276848;
+  --color-accent: #2f6fb5;
+  --color-accent-hover: #275c96;
   --color-accent-fg: #ffffff;
-  --color-accent-text: #6cc08b;
+  --color-accent-text: #6fb0e8;
 
   /* State color, not an accent. */
   --color-danger-text: #e79a94;

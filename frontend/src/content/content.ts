@@ -1,6 +1,7 @@
 import type { AnalyzeBackendResult } from '../types/analysis'
 import { DEFAULT_PROFILE } from './defaultProfile'
 import { extractPage } from './extract'
+import { playScanAnimation } from './scanAnimation'
 import {
   applyBackendActions,
   applySimplification,
@@ -63,6 +64,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(extractPage())
       return true
     case 'DISTILL_SIMPLIFY':
+      // Fire-and-forget, deliberately not awaited: the sweep is decoration and
+      // must never sit between the press and the analysis round-trip. Activate
+      // only — restoring the page does not replay it.
+      playScanAnimation()
       handleSimplify().then(sendResponse)
       return true
     case 'DISTILL_RESTORE':
