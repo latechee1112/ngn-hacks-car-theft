@@ -152,6 +152,11 @@ html[${SIMPLIFIED_ATTR}] .${UNSTICK_CLASS} {
   left: auto !important;
   right: auto !important;
   bottom: auto !important;
+  /* A common centering trick pairs left: 50% with transform: translateX(-50%) to
+     center a fixed-width fixed/sticky bar. Resetting left above without also resetting
+     the transform leaves that shift active on the element's new in-flow position,
+     shoving it half its own width off to one side instead of centering it. */
+  transform: none !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
@@ -439,7 +444,7 @@ function buildSections(root: Element): Element[][] {
 
   if (wrapperCount >= 2) {
     const groups: Element[][] = []
-    let intro: Element[] = []
+    const intro: Element[] = []
     let seenWrapper = false
     children.forEach((child) => {
       if (isSectionWrapper(child)) {
