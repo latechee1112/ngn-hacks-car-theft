@@ -1,22 +1,10 @@
-export type ElementType =
-  | 'heading'
-  | 'paragraph'
-  | 'article'
-  | 'section'
-  | 'nav'
-  | 'sidebar'
-  | 'ad'
-  | 'form'
-  | 'input'
-  | 'button'
-  | 'image'
-  | 'video'
-  | 'popup'
-  | 'sticky'
-  | 'link-group'
-  | 'other'
+// Wire contract with the backend's PageBlock/BoundingBox models
+// (backend/models/common.py). Field names and shape must match exactly —
+// the backend is the source of truth; this file follows it, not vice versa.
 
-export interface PageBlockPosition {
+export type Landmark = 'main' | 'article' | 'nav' | 'aside' | 'header' | 'footer' | 'form' | 'dialog' | 'other'
+
+export interface BoundingBox {
   x: number
   y: number
   width: number
@@ -24,16 +12,24 @@ export interface PageBlockPosition {
 }
 
 export interface PageBlock {
-  id: string
+  blockId: string
   tag: string
-  role: string
-  textPreview: string
-  elementType: ElementType
-  position: PageBlockPosition
+  landmark?: Landmark
+  role?: string
+  text: string
   isInteractive: boolean
-  isFixed: boolean
-  hasAnimation: boolean
-  linkCount: number
+  isFormControl: boolean
+  isFormInstruction: boolean
+  isPasswordField: boolean
+  isPaymentField: boolean
+  isConsentControl: boolean
+  isWarning: boolean
+  isAd: boolean
+  isStickyPromo: boolean
+  isAutoplayMedia: boolean
+  isRepeatedLink: boolean
+  visible: boolean
+  boundingBox?: BoundingBox
 }
 
 export interface ExtractionResult {
