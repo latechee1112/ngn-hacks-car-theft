@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        sidepanel: resolve(__dirname, 'sidepanel.html'),
+        sidepanel: resolve(import.meta.dirname, 'sidepanel.html'),
       },
     },
   },

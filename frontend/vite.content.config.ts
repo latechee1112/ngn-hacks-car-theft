@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: false,
     rollupOptions: {
-      input: resolve(__dirname, 'src/content/content.ts'),
+      input: resolve(import.meta.dirname, 'src/content/content.ts'),
       output: {
         format: 'iife',
         entryFileNames: 'content.js',
