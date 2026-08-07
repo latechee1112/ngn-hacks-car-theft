@@ -49,17 +49,17 @@ function isExtractable(el: Element): boolean {
   return /^h[1-6]$/.test(tag)
 }
 
-function findLinkGroups(): Element[] {
+function findLinkGroups(): { el: Element; count: number }[] {
   const counts = new Map<Element, number>()
   document.querySelectorAll('a[href]').forEach((a) => {
     const parent = a.parentElement
     if (!parent) return
     counts.set(parent, (counts.get(parent) || 0) + 1)
   })
-  const groups: Element[] = []
+  const groups: { el: Element; count: number }[] = []
   counts.forEach((count, parent) => {
     if (count >= LINK_GROUP_MIN_LINKS && !parent.closest('nav')) {
-      groups.push(parent)
+      groups.push({ el: parent, count })
     }
   })
   return groups
@@ -232,7 +232,11 @@ function nextIdCounter(): number {
   return max + 1
 }
 
-function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: boolean } = {}): PageBlock {
+function buildBlock(
+  el: Element,
+  counter: { n: number },
+  opts: { repeatedLink?: boolean; linkCount?: number } = {},
+): PageBlock {
   let id = el.getAttribute(FF_ID_ATTR)
   if (!id) {
     id = `ff-${counter.n++}`
@@ -247,7 +251,7 @@ function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: 
     isInteractive: isInteractiveOf(el),
     isFixed: isStickyOrFixed(el),
     hasAnimation: false,
-    linkCount: 0,
+    linkCount: opts.linkCount ?? 0,
     boundingBox: boundingBoxOf(el),
     safetyFlags: {
       isFormControl: isFormControlOf(el),
@@ -274,10 +278,10 @@ export function extractPage(): ExtractionResult {
     blocks.push(buildBlock(el, counter))
   })
 
-  findLinkGroups().forEach((el) => {
+  findLinkGroups().forEach(({ el, count }) => {
     if (seen.has(el) || !isVisible(el)) return
     seen.add(el)
-    blocks.push(buildBlock(el, counter, { repeatedLink: true }))
+    blocks.push(buildBlock(el, counter, { repeatedLink: true, linkCount: count }))
   })
 
   return {
