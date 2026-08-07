@@ -41,14 +41,15 @@ class ElementType(str, Enum):
     OTHER = "other"
 
 
-class PageBlockPosition(BaseModel):
-    """Absolute page-pixel coordinates, as produced by getBoundingClientRect()
-    plus scroll offset - not normalized fractions."""
+class BoundingBox(BaseModel):
+    """Viewport-relative fractions (0-1) of an element's getBoundingClientRect(),
+    matching the frontend's BoundingBox contract (frontend/src/types/page.ts) -
+    not raw pixels, and not scroll-adjusted since it's viewport-relative."""
 
-    x: float
-    y: float
-    width: float = Field(ge=0)
-    height: float = Field(ge=0)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(ge=0, le=1)
+    height: float = Field(ge=0, le=1)
 
 
 # Frontend never extracts a structured "is this a password/payment/consent
@@ -96,7 +97,7 @@ class PageBlock(BaseModel):
     role: str = Field(default="", max_length=64)
     text_preview: str = Field(default="", alias="textPreview", max_length=2000)
     element_type: ElementType = Field(alias="elementType")
-    position: Optional[PageBlockPosition] = None
+    bounding_box: Optional[BoundingBox] = Field(default=None, alias="boundingBox")
     is_interactive: bool = Field(default=False, alias="isInteractive")
     is_fixed: bool = Field(default=False, alias="isFixed")
     has_animation: bool = Field(default=False, alias="hasAnimation")
@@ -104,6 +105,13 @@ class PageBlock(BaseModel):
     safety_flags: SafetyFlags = Field(default_factory=SafetyFlags, alias="safetyFlags")
 
     def is_safety_critical(self) -> bool:
+        if (
+            self.safety_flags.is_consent_control
+            or self.safety_flags.is_password_field
+            or self.safety_flags.is_payment_field
+            or self.safety_flags.is_warning
+        ):
+            return True
         return bool(self.text_preview) and bool(_SENSITIVE_TEXT_RE.search(self.text_preview))
 
     def is_protected_from_collapse(self) -> bool:

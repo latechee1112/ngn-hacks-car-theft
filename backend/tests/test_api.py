@@ -97,7 +97,7 @@ def test_analyze_page_accepts_full_extraction_result_shape(client):
                 "role": "form",
                 "textPreview": "",
                 "elementType": "form",
-                "position": {"x": 10, "y": 20, "width": 300, "height": 400},
+                "boundingBox": {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
                 "isInteractive": False,
                 "isFixed": False,
                 "hasAnimation": False,
