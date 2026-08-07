@@ -1,4 +1,4 @@
-import type { BoundingBox, ExtractionResult, Landmark, PageBlock } from '../types/page'
+import type { BoundingBox, ElementType, ExtractionResult, PageBlock } from '../types/page'
 import {
   isAdLike,
   isConsentControlLike,
@@ -49,17 +49,17 @@ function isExtractable(el: Element): boolean {
   return /^h[1-6]$/.test(tag)
 }
 
-function findLinkGroups(): Element[] {
+function findLinkGroups(): { el: Element; count: number }[] {
   const counts = new Map<Element, number>()
   document.querySelectorAll('a[href]').forEach((a) => {
     const parent = a.parentElement
     if (!parent) return
     counts.set(parent, (counts.get(parent) || 0) + 1)
   })
-  const groups: Element[] = []
+  const groups: { el: Element; count: number }[] = []
   counts.forEach((count, parent) => {
     if (count >= LINK_GROUP_MIN_LINKS && !parent.closest('nav')) {
-      groups.push(parent)
+      groups.push({ el: parent, count })
     }
   })
   return groups
@@ -81,21 +81,33 @@ function roleOf(el: Element): string {
   return implicit[el.tagName.toLowerCase()] || el.tagName.toLowerCase()
 }
 
-// Maps to the backend's landmark vocabulary: main, article, nav, aside,
-// header, footer, form, dialog, other. Non-landmark elements get undefined
-// rather than "other" so the field is only set when it's actually meaningful.
-function landmarkOf(el: Element): Landmark | undefined {
+// Maps our DOM classification onto the backend's ElementType enum
+// (backend/models/common.py::ElementType). The old `landmark` vocabulary
+// (main/article/nav/aside/header/footer/form/dialog/other) and the boolean
+// flags were never mutually exclusive, but elementType is a single value, so
+// this imposes a priority order where more than one classification applies.
+// Tags with no clean enum equivalent (header, footer, main, label, legend,
+// and generic non-video iframes) fall through to 'other' — flagged as guesses,
+// see task summary.
+function elementTypeOf(el: Element, opts: { isLinkGroup?: boolean } = {}): ElementType {
+  if (opts.isLinkGroup) return 'link-group'
   const tag = el.tagName.toLowerCase()
-  const role = el.getAttribute('role')
-  if (tag === 'main' || role === 'main') return 'main'
+  if (/^h[1-6]$/.test(tag)) return 'heading'
+  if (isPopupLike(el) || tag === 'dialog') return 'popup'
+  if (isAdLike(el)) return 'ad'
+  if (isStickyOrFixed(el)) return 'sticky'
+  if (tag === 'form') return 'form'
+  if (['input', 'select', 'textarea'].includes(tag)) return 'input'
+  if (tag === 'button' || el.getAttribute('role') === 'button') return 'button'
+  if (['img', 'picture', 'svg'].includes(tag)) return 'image'
+  if (tag === 'video') return 'video'
+  if (tag === 'iframe') return isAutoplayMediaOf(el) ? 'video' : 'other'
   if (tag === 'article') return 'article'
-  if (tag === 'nav' || role === 'navigation') return 'nav'
-  if (tag === 'aside' || role === 'complementary') return 'aside'
-  if (tag === 'header' || role === 'banner') return 'header'
-  if (tag === 'footer' || role === 'contentinfo') return 'footer'
-  if (tag === 'form' || role === 'form') return 'form'
-  if (tag === 'dialog' || role === 'dialog' || el.getAttribute('aria-modal') === 'true') return 'dialog'
-  return undefined
+  if (tag === 'section') return 'section'
+  if (tag === 'nav') return 'nav'
+  if (tag === 'aside' || isSidebarLike(el)) return 'sidebar'
+  if (tag === 'p') return 'paragraph'
+  return 'other'
 }
 
 function isInteractiveOf(el: Element): boolean {
@@ -220,31 +232,38 @@ function nextIdCounter(): number {
   return max + 1
 }
 
-function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: boolean } = {}): PageBlock {
+function buildBlock(
+  el: Element,
+  counter: { n: number },
+  opts: { repeatedLink?: boolean; linkCount?: number } = {},
+): PageBlock {
   let id = el.getAttribute(FF_ID_ATTR)
   if (!id) {
     id = `ff-${counter.n++}`
     el.setAttribute(FF_ID_ATTR, id)
   }
   return {
-    blockId: id,
+    id,
     tag: el.tagName.toLowerCase(),
-    landmark: landmarkOf(el),
     role: roleOf(el),
-    text: textOf(el),
+    textPreview: textOf(el),
+    elementType: elementTypeOf(el, { isLinkGroup: !!opts.repeatedLink }),
     isInteractive: isInteractiveOf(el),
-    isFormControl: isFormControlOf(el),
-    isFormInstruction: isFormInstructionOf(el),
-    isPasswordField: isPasswordFieldOf(el),
-    isPaymentField: isPaymentFieldOf(el),
-    isConsentControl: isConsentControlLike(el),
-    isWarning: isWarningLike(el),
-    isAd: isAdLike(el),
-    isStickyPromo: isStickyOrFixed(el) || isPopupLike(el),
-    isAutoplayMedia: isAutoplayMediaOf(el),
-    isRepeatedLink: !!opts.repeatedLink,
-    visible: true,
+    isFixed: isStickyOrFixed(el),
+    hasAnimation: false,
+    linkCount: opts.linkCount ?? 0,
     boundingBox: boundingBoxOf(el),
+    safetyFlags: {
+      isFormControl: isFormControlOf(el),
+      isFormInstruction: isFormInstructionOf(el),
+      isPasswordField: isPasswordFieldOf(el),
+      isPaymentField: isPaymentFieldOf(el),
+      isConsentControl: isConsentControlLike(el),
+      isWarning: isWarningLike(el),
+      isAd: isAdLike(el),
+      isRepeatedLink: !!opts.repeatedLink,
+    },
+    visible: true,
   }
 }
 
@@ -259,10 +278,10 @@ export function extractPage(): ExtractionResult {
     blocks.push(buildBlock(el, counter))
   })
 
-  findLinkGroups().forEach((el) => {
+  findLinkGroups().forEach(({ el, count }) => {
     if (seen.has(el) || !isVisible(el)) return
     seen.add(el)
-    blocks.push(buildBlock(el, counter, { repeatedLink: true }))
+    blocks.push(buildBlock(el, counter, { repeatedLink: true, linkCount: count }))
   })
 
   return {
