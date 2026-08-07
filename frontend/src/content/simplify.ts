@@ -74,6 +74,23 @@ function collectNoiseTargets(primary: Element | null): Element[] {
   return pruneNested(Array.from(targets))
 }
 
+// Some sites give a fixed/sticky bar its full width via `left: 0; right: 0` rather than
+// an explicit width — a trick that only resolves for fixed/absolute positioning. Swapping
+// to `position: relative` (UNSTICK_CLASS) drops that computation, so the box collapses to
+// shrink-fit its in-flow content, which can also orphan any position:absolute children
+// (e.g. a logo anchored to it) that were relying on it staying full-sized. Pinning the
+// rendered width as an inline style — captured before the position change — sidesteps the
+// site's own CSS mechanism entirely instead of trying to replicate it.
+function unstickElement(el: Element): void {
+  const rect = el.getBoundingClientRect()
+  const htmlEl = el as HTMLElement
+  // getBoundingClientRect() is a border-box measurement; force border-box sizing so the
+  // pinned width lines up exactly regardless of the page's own box-sizing for this element.
+  htmlEl.style.setProperty('box-sizing', 'border-box', 'important')
+  htmlEl.style.setProperty('width', `${Math.round(rect.width)}px`, 'important')
+  el.classList.add(UNSTICK_CLASS)
+}
+
 function pauseAutoplayMedia(): void {
   document.querySelectorAll<HTMLMediaElement>('video[autoplay], audio[autoplay]').forEach((media) => {
     saveOriginal(media)
@@ -244,7 +261,7 @@ export function applySimplification(): SimplifyResult {
   targets.forEach((el) => {
     saveOriginal(el)
     el.classList.add(DEEMPHASIZE_CLASS)
-    if (isStickyOrFixed(el)) el.classList.add(UNSTICK_CLASS)
+    if (isStickyOrFixed(el)) unstickElement(el)
   })
 
   pauseAutoplayMedia()
