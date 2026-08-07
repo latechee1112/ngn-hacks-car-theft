@@ -92,9 +92,6 @@ html[${SIMPLIFIED_ATTR}] body {
   line-height: 1.7 !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} {
-  max-width: 760px !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
   font-size: 1.15em !important;
   line-height: 1.75 !important;
   float: none !important;
@@ -127,7 +124,15 @@ html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
   filter: none !important;
 }
 html[${SIMPLIFIED_ATTR}] .${UNSTICK_CLASS} {
-  position: static !important;
+  /* relative, not static: still pulls the element into normal flow (no longer
+     stuck over content), but unlike static it still establishes a positioning
+     context, so any position:absolute children (e.g. a logo/nav-links block
+     anchored to this element) don't lose their containing block and vanish. */
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
