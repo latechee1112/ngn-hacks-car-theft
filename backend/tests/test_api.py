@@ -79,32 +79,3 @@ def test_analyze_page_never_collapses_safety_critical_at_max_strength(client):
     actions = {a["blockId"]: a["action"] for a in resp.json()["actions"]}
     assert actions["b1"] != "collapse"
     assert actions["b2"] == "collapse"
-<<<<<<< HEAD
-=======
-
-
-def test_analyze_page_accepts_full_extraction_result_shape(client):
-    payload = {
-        "url": "https://example.com/signup",
-        "extractedAt": 1735689600000,
-        "hasSensitiveForms": True,
-        "profile": _profile(),
-        "task": "Fill out the signup form",
-        "blocks": [
-            {
-                "id": "b1",
-                "tag": "form",
-                "role": "form",
-                "textPreview": "",
-                "elementType": "form",
-                "boundingBox": {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
-                "isInteractive": False,
-                "isFixed": False,
-                "hasAnimation": False,
-                "linkCount": 0,
-            },
-        ],
-    }
-    resp = client.post("/v1/analyze-page", json=payload)
-    assert resp.status_code == 200
->>>>>>> 2ffc2e741f057f663e148ae78953aa543f5593cb
