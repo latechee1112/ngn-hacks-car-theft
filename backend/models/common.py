@@ -64,6 +64,24 @@ _SENSITIVE_TEXT_RE = re.compile(
 )
 
 
+class SafetyFlags(BaseModel):
+    """Load-bearing classification/safety signals from the frontend's DOM
+    heuristics (e.g. is_consent_control caught the consent-banner-hiding
+    bug) - a first-class field on PageBlock, not part of the extra:"ignore"
+    catch-all."""
+
+    model_config = {"populate_by_name": True}
+
+    is_form_control: bool = Field(default=False, alias="isFormControl")
+    is_form_instruction: bool = Field(default=False, alias="isFormInstruction")
+    is_password_field: bool = Field(default=False, alias="isPasswordField")
+    is_payment_field: bool = Field(default=False, alias="isPaymentField")
+    is_consent_control: bool = Field(default=False, alias="isConsentControl")
+    is_warning: bool = Field(default=False, alias="isWarning")
+    is_ad: bool = Field(default=False, alias="isAd")
+    is_repeated_link: bool = Field(default=False, alias="isRepeatedLink")
+
+
 class PageBlock(BaseModel):
     """Sanitized metadata describing one visible block on the page.
 
@@ -83,6 +101,7 @@ class PageBlock(BaseModel):
     is_fixed: bool = Field(default=False, alias="isFixed")
     has_animation: bool = Field(default=False, alias="hasAnimation")
     link_count: int = Field(default=0, alias="linkCount", ge=0)
+    safety_flags: SafetyFlags = Field(default_factory=SafetyFlags, alias="safetyFlags")
 
     def is_safety_critical(self) -> bool:
         return bool(self.text_preview) and bool(_SENSITIVE_TEXT_RE.search(self.text_preview))
