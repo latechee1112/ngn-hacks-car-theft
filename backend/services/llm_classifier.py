@@ -21,8 +21,9 @@ logger = logging.getLogger("focusfit.llm_classifier")
 _VALID_LABELS = {label.value for label in ClassificationLabel}
 
 _SYSTEM_PROMPT = """You are a page-simplification classifier for an accessibility tool called \
-FocusFit. You will be given a JSON list of sanitized webpage block descriptions and must \
-classify each block's relevance to the user's stated task.
+FocusFit. You will be given a JSON list of sanitized webpage block descriptions (each with an \
+elementType like heading/paragraph/article/section/nav/sidebar/ad/form/input/button/image/video/ \
+popup/sticky/link-group/other) and must classify each block's relevance to the user's stated task.
 
 Rules you MUST follow:
 - Respond with JSON only: {"classifications": [{"blockId": "...", "label": "...", "reason": "..."}]}
@@ -30,9 +31,10 @@ Rules you MUST follow:
 - "label" must be exactly one of: Essential, Supporting, Distracting, Safety-critical, Uncertain.
 - Never output HTML, JavaScript, CSS, or any executable code.
 - Never rewrite or repeat webpage content beyond a short "reason" (<=15 words).
-- If a block is a password field, payment field, consent control, or warning/validation \
-message, you MUST label it Safety-critical.
-- If a block is a required form instruction, prefer Supporting or Safety-critical, never Distracting.
+- textPreview is only ever a label/placeholder/heading snippet, never real user input - but if it \
+reads like a password/payment/consent/warning/validation message, label that block Safety-critical.
+- If pageHasSensitiveForms is true, be extra conservative with elementType "form"/"input"/"button" \
+blocks - prefer Safety-critical or Supporting over Distracting for them.
 - When unsure about a block's relevance, use Uncertain rather than guessing - this is an \
 accessibility aid, not a diagnostic tool, so err conservative.
 - Do not include more than one entry per block ID.
@@ -61,17 +63,20 @@ class RawClassificationResponse(BaseModel):
     classifications: List[RawClassification]
 
 
-def _build_user_payload(blocks: List[PageBlock], profile: VisualProfile, task: Optional[str]) -> str:
+def _build_user_payload(
+    blocks: List[PageBlock],
+    profile: VisualProfile,
+    task: Optional[str],
+    has_sensitive_forms: bool,
+) -> str:
     sanitized = [
         {
-            "blockId": b.block_id,
+            "blockId": b.id,
             "tag": b.tag,
-            "landmark": b.landmark,
             "role": b.role,
-            "text": b.text,
+            "elementType": b.element_type.value,
+            "textPreview": b.text_preview,
             "isInteractive": b.is_interactive,
-            "isFormControl": b.is_form_control,
-            "isFormInstruction": b.is_form_instruction,
             "isSafetyCritical": b.is_safety_critical(),
         }
         for b in blocks
@@ -79,6 +84,7 @@ def _build_user_payload(blocks: List[PageBlock], profile: VisualProfile, task: O
     payload = {
         "task": task or "General browsing - reduce visual clutter.",
         "simplificationStrength": profile.simplification_strength,
+        "pageHasSensitiveForms": has_sensitive_forms,
         "blocks": sanitized,
     }
     return json.dumps(payload)
@@ -89,6 +95,7 @@ def classify_blocks(
     profile: VisualProfile,
     task: Optional[str],
     settings: Settings,
+    has_sensitive_forms: bool = False,
 ) -> List[RawClassification]:
     if not settings.featherless_api_key:
         raise LLMClassificationError("No LLM API key configured")
@@ -104,7 +111,10 @@ def classify_blocks(
             model=settings.featherless_model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": _build_user_payload(blocks, profile, task)},
+                {
+                    "role": "user",
+                    "content": _build_user_payload(blocks, profile, task, has_sensitive_forms),
+                },
             ],
             response_format={"type": "json_object"},
             temperature=0,

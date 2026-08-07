@@ -7,11 +7,18 @@ from models.profile import VisualProfile
 
 
 class AnalyzePageRequest(BaseModel):
+    """Accepts the frontend's ExtractionResult fields directly, plus the
+    stored profile and an optional task - i.e. the frontend can send
+    {...extractionResult, profile, task} as-is."""
+
     model_config = {"populate_by_name": True}
 
     blocks: List[PageBlock]
     profile: VisualProfile
     task: Optional[str] = Field(default=None, max_length=300)
+    url: Optional[str] = Field(default=None, max_length=2000)
+    extracted_at: Optional[int] = Field(default=None, alias="extractedAt")
+    has_sensitive_forms: bool = Field(default=False, alias="hasSensitiveForms")
 
 
 class LayoutSettings(BaseModel):
