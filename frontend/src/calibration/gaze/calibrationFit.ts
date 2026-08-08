@@ -33,7 +33,9 @@ export function dotToNormalizedPoint(dot: CalibrationDot): [number, number] {
 // Time to dwell on each dot before registering it. Serves two purposes:
 // lets the user actually fixate before we start counting frames toward that
 // dot's fit, and gives registerCalibrationPoint's rolling sample buffer
-// (CALIBRATION_SAMPLE_BUFFER_SIZE in useGazeTracker.ts, ~625ms of frames at
+// (CALIBRATION_SAMPLE_BUFFER_SIZE in useGazeTracker.ts, ~1000ms of frames at
 // ~24Hz) time to fill with fresh, on-target frames rather than leftover
-// frames from the previous dot or the transition between them.
-export const CALIBRATION_DOT_INTERVAL_MS = 1050
+// frames from the previous dot or the transition between them. Kept above
+// the buffer's fill time so the buffer is full of settled fixation frames,
+// not still draining saccade-landing noise from the jump to this dot.
+export const CALIBRATION_DOT_INTERVAL_MS = 1300

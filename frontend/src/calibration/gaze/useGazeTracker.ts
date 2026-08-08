@@ -43,8 +43,33 @@ const MIN_FRAME_INTERVAL_MS = 1000 / 24
 // of samples for one label, which both the closed-form affine fit and the
 // gradient step use directly - more, consistent samples per dot materially
 // improves calibration accuracy over a single frame. At MIN_FRAME_INTERVAL_MS
-// (~24Hz) this is roughly the last 600ms of fixation on the dot.
-const CALIBRATION_SAMPLE_BUFFER_SIZE = 15
+// (~24Hz) this is roughly the last 1000ms of fixation on the dot - sized to
+// use nearly the whole CALIBRATION_DOT_INTERVAL_MS dwell instead of only its
+// tail.
+const CALIBRATION_SAMPLE_BUFFER_SIZE = 24
+
+// Rejects samples whose headVector is far from the buffer's own median -
+// catches a stray head-turn or landmark glitch mid-dwell without needing a
+// second frame source to cross-check against. MAD-based rather than a fixed
+// distance threshold since headVector's scale isn't documented by the
+// library. Left as-is (unfiltered) below 4 samples - not enough to estimate
+// a reliable median/spread from - and falls back to the unfiltered set if
+// filtering would leave fewer than 3 samples, so a genuinely noisy dot still
+// contributes something rather than nothing.
+function filterByHeadVector(samples: BufferedGazeSample[]): BufferedGazeSample[] {
+  if (samples.length < 4) return samples
+  const dims = samples[0].headVector.length
+  const median = Array.from({ length: dims }, (_, d) => {
+    const sorted = samples.map((s) => s.headVector[d]).sort((a, b) => a - b)
+    return sorted[Math.floor(sorted.length / 2)]
+  })
+  const distanceFromMedian = (headVector: number[]) => Math.hypot(...headVector.map((v, d) => v - median[d]))
+  const distances = samples.map((s) => distanceFromMedian(s.headVector))
+  const sortedDistances = [...distances].sort((a, b) => a - b)
+  const mad = sortedDistances[Math.floor(sortedDistances.length / 2)] || 1e-6
+  const filtered = samples.filter((_, i) => distances[i] <= mad * 3)
+  return filtered.length >= 3 ? filtered : samples
+}
 
 interface BufferedGazeSample {
   eyePatch: ImageData
@@ -116,12 +141,12 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
   }, [])
 
   const registerCalibrationPoint = useCallback((x: number, y: number) => {
-    const samples = recentSamplesRef.current
     // Buffer is cleared after every dot, so a dot with the eyes closed or
-    // face lost for its whole dwell window (samples.length === 0) simply
+    // face lost for its whole dwell window (recentSamplesRef empty) simply
     // contributes nothing rather than fitting on stale frames left over
     // from the previous dot.
-    if (!trackerRef.current || samples.length === 0) return
+    if (!trackerRef.current || recentSamplesRef.current.length === 0) return
+    const samples = filterByHeadVector(recentSamplesRef.current)
     trackerRef.current.adapt(
       samples.map((s) => s.eyePatch),
       samples.map((s) => s.headVector),
