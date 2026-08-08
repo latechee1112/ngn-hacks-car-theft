@@ -437,6 +437,14 @@ function App() {
             <Icon name="sliders" />
             View Settings
           </button>
+          <button
+            type="button"
+            onClick={openCalibration}
+            className={`flex w-full items-center justify-center gap-2 rounded-md border border-outline bg-surface px-4 py-2 text-body font-medium text-on-surface transition-colors hover:bg-surface-hover ${FOCUS_RING}`}
+          >
+            <Icon name="eye" />
+            Recalibrate
+          </button>
         </div>
 
         {error && <p className="text-meta text-danger-text">{error}</p>}
