@@ -138,15 +138,19 @@ function App() {
       const point = latestGazePointRef.current
       const dot = gazeDotRef.current
       if (!point || !dot) return
-      // Snap onto the target's center once gaze is within the same
+      // Pull toward the target's center once gaze is within the same
       // tolerance hit-testing uses to count it as "on the target"
-      // (hitTest.ts's HIT_TOLERANCE_PX) - so the snap only fires when a
-      // hit would actually be scored, not as a separate, more lenient
-      // magnet radius.
+      // (hitTest.ts's HIT_TOLERANCE_PX), so it reads as "on the target"
+      // rather than drifting off it - but only a partial pull, not a hard
+      // snap, so it still moves a little with the raw signal instead of
+      // freezing dead-center for as long as gaze stays in range.
       const targetRect = currentTargetRect()
       const showAt =
         targetRect && isOnTarget(point, targetRect)
-          ? { x: targetRect.left + targetRect.width / 2, y: targetRect.top + targetRect.height / 2 }
+          ? {
+              x: point.x * 0.4 + (targetRect.left + targetRect.width / 2) * 0.6,
+              y: point.y * 0.4 + (targetRect.top + targetRect.height / 2) * 0.6,
+            }
           : point
       dot.style.transform = `translate3d(${showAt.x}px, ${showAt.y}px, 0) translate(-50%, -50%)`
       dot.style.opacity = '1'

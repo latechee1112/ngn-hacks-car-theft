@@ -103,14 +103,6 @@ class PageBlock(BaseModel):
             or self.is_warning
         )
 
-    def is_protected_from_collapse(self) -> bool:
-        """Blocks that must never be collapsed/hidden, per spec."""
-        return (
-            self.is_safety_critical()
-            or self.is_form_instruction
-            or (self.is_form_control and self.visible)
-        )
-
 
 class BlockAction(BaseModel):
     block_id: str = Field(alias="blockId")

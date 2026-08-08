@@ -122,10 +122,12 @@ function roleOf(el: Element): string {
   return implicit[el.tagName.toLowerCase()] || el.tagName.toLowerCase()
 }
 
-// Maps to the backend's landmark vocabulary: main, article, nav, aside,
-// header, footer, form, dialog, other. Non-landmark elements get undefined
-// rather than "other" so the field is only set when it's actually meaningful.
-function landmarkOf(el: Element): Landmark | undefined {
+const LANDMARK_SELECTOR =
+  'main, [role="main"], article, nav, [role="navigation"], aside, [role="complementary"], ' +
+  'header, [role="banner"], footer, [role="contentinfo"], form, [role="form"], ' +
+  'dialog, [role="dialog"], [aria-modal="true"]'
+
+function tagLandmarkOf(el: Element): Landmark | undefined {
   const tag = el.tagName.toLowerCase()
   const role = el.getAttribute('role')
   if (tag === 'main' || role === 'main') return 'main'
@@ -137,6 +139,29 @@ function landmarkOf(el: Element): Landmark | undefined {
   if (tag === 'form' || role === 'form') return 'form'
   if (tag === 'dialog' || role === 'dialog' || el.getAttribute('aria-modal') === 'true') return 'dialog'
   return undefined
+}
+
+// Maps to the backend's landmark vocabulary: main, article, nav, aside,
+// header, footer, form, dialog, other. Non-landmark elements get undefined
+// rather than "other" so the field is only set when it's actually meaningful.
+//
+// This is the block's containing region, not just "is this element itself a
+// <main>/<article> tag" - closest() walks up to the nearest ancestor (or el
+// itself) that matches. Checking only the element's own tag/role meant
+// every block nested inside <main>/<article> (i.e. nearly everything on a
+// real page - a post's image, a paragraph, a heading) got landmark:
+// undefined, since only the single outer <main> element itself ever
+// qualified. That starved the backend's "landmark in main/article ->
+// Essential" rule (rule_engine.py's classify_block) of the one signal it
+// needs, leaving image-only blocks in particular (no text for the LLM to
+// judge relevance from either) to fall through as Uncertain and get
+// misjudged as Distracting - the reported bug of a post's own photo getting
+// blurred. rule_engine.classify_block checks explicit ad/promo/autoplay
+// signals before this landmark check specifically so an ad nested inside an
+// <article> still gets flagged as an ad rather than inheriting Essential.
+function landmarkOf(el: Element): Landmark | undefined {
+  const host = el.closest(LANDMARK_SELECTOR)
+  return host ? tagLandmarkOf(host) : undefined
 }
 
 function isInteractiveOf(el: Element): boolean {

@@ -91,7 +91,18 @@ export function isSponsoredLabel(el: Element): boolean {
   return text.split(/[·•|]|\s[–—-]\s/).some((segment) => SPONSORED_SEGMENT_PATTERN.test(segment.trim()))
 }
 
+// A modal/popup/overlay is always some kind of container - never literally a
+// leaf media tag itself. Reddit (and other galleries) name a plain, perfectly
+// normal post image "...-lightbox-img" because clicking it OPENS a lightbox;
+// that is not the same thing as the image BEING a popup. Without this
+// exemption, POPUP_PATTERN's bare substring match on "lightbox" flagged the
+// post's own photo, which extract.ts's isStickyPromo (and, from there, the
+// backend's classify_block) treats as a hard "distracting" signal - the
+// actual cause of a post's main image getting blurred.
+const POPUP_EXEMPT_TAGS = new Set(['img', 'picture', 'video', 'source', 'svg', 'audio'])
+
 export function isPopupLike(el: Element): boolean {
+  if (POPUP_EXEMPT_TAGS.has(el.tagName.toLowerCase())) return false
   const cls = classNameString(el)
   return POPUP_PATTERN.test(cls) || el.getAttribute('role') === 'dialog' || el.getAttribute('aria-modal') === 'true'
 }

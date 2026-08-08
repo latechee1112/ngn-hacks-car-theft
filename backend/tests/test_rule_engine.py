@@ -49,14 +49,17 @@ def test_main_landmark_is_essential():
     assert rule_engine.classify_block(block) == ClassificationLabel.ESSENTIAL
 
 
-def test_nav_is_distracting_and_collapsed_at_high_simplification_strength():
+def test_distracting_block_is_deemphasized_even_at_high_simplification_strength():
+    # Distracting content is dimmed, never fully removed, regardless of
+    # strength - full removal is reserved for the frontend's own local ad
+    # detection, never this classification (see action_for_category).
     block = make_block(tag="nav", landmark="nav")
     profile = make_profile(simplification_strength=0.8)
     action = rule_engine.fallback_action(block, profile)
-    assert action.action.value == "collapse"
+    assert action.action.value == "deemphasize"
 
 
-def test_distracting_block_only_deemphasized_at_low_simplification_strength():
+def test_distracting_block_is_deemphasized_at_low_simplification_strength():
     block = make_block(tag="nav", landmark="nav")
     profile = make_profile(simplification_strength=0.2)
     action = rule_engine.fallback_action(block, profile)

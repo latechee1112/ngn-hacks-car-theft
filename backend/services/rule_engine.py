@@ -14,8 +14,6 @@ _MAIN_LANDMARKS = {"main", "article"}
 _LOW_RELEVANCE_LANDMARKS = {"nav", "aside", "footer"}
 _LOW_RELEVANCE_TAGS = {"nav", "aside", "footer"}
 
-_COLLAPSE_STRENGTH_THRESHOLD = 0.6
-
 _PRIORITY_BY_CATEGORY = {
     ClassificationLabel.SAFETY_CRITICAL: 1,
     ClassificationLabel.ESSENTIAL: 2,
@@ -37,14 +35,20 @@ def classify_block(block: PageBlock) -> ClassificationLabel:
     landmark = (block.landmark or "").lower()
     tag = (block.tag or "").lower()
 
+    # Explicit ad/promo/autoplay/repeated-link signals must win over the
+    # landmark check below: the frontend now resolves `landmark` from the
+    # nearest ancestor main/article (see extract.ts's landmarkOf), not just
+    # the element's own tag, so an in-content ad or promo card sitting
+    # inside <article> would otherwise inherit "main landmark -> Essential"
+    # and never reach this check at all.
+    if block.is_ad or block.is_sticky_promo or block.is_autoplay_media or block.is_repeated_link:
+        return ClassificationLabel.DISTRACTING
+
     if landmark in _MAIN_LANDMARKS:
         return ClassificationLabel.ESSENTIAL
 
     if tag.startswith("h") and tag[1:].isdigit() and landmark in _MAIN_LANDMARKS | {""}:
         return ClassificationLabel.SUPPORTING
-
-    if block.is_ad or block.is_sticky_promo or block.is_autoplay_media or block.is_repeated_link:
-        return ClassificationLabel.DISTRACTING
 
     if landmark in _LOW_RELEVANCE_LANDMARKS or tag in _LOW_RELEVANCE_TAGS:
         return ClassificationLabel.DISTRACTING
@@ -101,11 +105,18 @@ def action_for_category(
     ):
         return ActionType.KEEP
 
-    # Distracting
-    if block.is_protected_from_collapse():
-        return ActionType.DEEMPHASIZE
-    if profile.simplification_strength >= _COLLAPSE_STRENGTH_THRESHOLD:
-        return ActionType.COLLAPSE
+    # Distracting content is always dimmed, never fully removed - full removal
+    # (display:none, ActionType.COLLAPSE) is reserved for the frontend's own
+    # local, high-confidence ad/tracker detection (hideAds() in simplify.ts),
+    # never for this classification. A dim is safe to be wrong about; a
+    # block disappearing outright is not, and this classification can be
+    # wrong - e.g. a plain post image once got flagged Distracting purely
+    # because its own class name happened to contain the substring
+    # "lightbox" (Reddit's naming for "clicking this opens a lightbox
+    # viewer", not the image being a popup - see dom-heuristics.ts's
+    # isPopupLike). profile.simplification_strength still controls how
+    # strongly deemphasized content is visually dimmed (see
+    # setBlurIntensity() in simplify.ts), just not whether it disappears.
     return ActionType.DEEMPHASIZE
 
 

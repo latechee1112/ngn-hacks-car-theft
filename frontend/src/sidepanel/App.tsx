@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import ToggleSwitch from './ToggleSwitch'
 import Icon from './Icon'
 import type { ExtractionResult } from '../types/page'
-import type { SimplifyResponse } from '../types/analysis'
+import type { SimplifyResponse, VisualProfile } from '../types/analysis'
 import { CALIBRATION_STORAGE_KEY, type StoredCalibration } from '../types/calibration'
 
 async function getActiveTabId(): Promise<number | null> {
@@ -45,7 +45,12 @@ const DEFAULT_SETTINGS: StoredSettings = {
   // 75% - deemphasized content should read as strongly blurred/censored the
   // first time a page is simplified, before the user touches the slider.
   intensity: 75,
-  reduceMotion: true,
+  // Off by default - a real OS-level "prefers-reduced-motion" preference
+  // still suppresses motion independently (see scanAnimation.ts's
+  // prefersReducedMotion()), so this only controls Distill's own opinion,
+  // not actual accessibility. Defaulting it on suppressed the scan-sweep
+  // animation for every user who never touched this toggle.
+  reduceMotion: false,
   increaseSpacing: true,
 }
 
@@ -88,14 +93,21 @@ function App() {
   // calibration wizard (src/calibration/App.tsx) — starts hidden so it
   // doesn't flash on before the storage check below resolves.
   const [showCalibrationBanner, setShowCalibrationBanner] = useState(false)
+  // The "Default Profile" card's actual data - null until a calibration run
+  // has completed at least once (checkCalibrationStatus below was reading
+  // record.profile only to decide the banner, never storing it anywhere the
+  // card could read from, which is why the card never changed).
+  const [calibrationProfile, setCalibrationProfile] = useState<VisualProfile | null>(null)
 
   async function checkCalibrationStatus() {
     try {
       const stored = await chrome.storage.local.get(CALIBRATION_STORAGE_KEY)
       const record = stored?.[CALIBRATION_STORAGE_KEY] as StoredCalibration | undefined
       setShowCalibrationBanner(!record?.profile && !record?.dismissed)
+      setCalibrationProfile(record?.profile ?? null)
     } catch {
       setShowCalibrationBanner(false)
+      setCalibrationProfile(null)
     }
   }
 
@@ -460,9 +472,17 @@ function App() {
         <div className="rounded-md border border-outline bg-surface p-4">
           <div className="mb-2 flex items-center gap-2">
             <Icon name="user" className="text-on-surface-variant" />
-            <h3 className="text-body font-medium text-on-surface">Default Profile</h3>
+            <h3 className="text-body font-medium text-on-surface">
+              {calibrationProfile ? 'Your Profile' : 'Default Profile'}
+            </h3>
           </div>
-          <p className="text-meta text-on-surface-variant">Spacing: +40% · Text: 1.15x · High Contrast</p>
+          <p className="text-meta text-on-surface-variant">
+            {calibrationProfile
+              ? `Spacing: +${Math.round((calibrationProfile.spacingMultiplier - 1) * 100)}% · Text: ${calibrationProfile.textScale}x · ${
+                  calibrationProfile.contrastMode === 'enhanced' ? 'High Contrast' : 'Standard Contrast'
+                }`
+              : 'Spacing: +40% · Text: 1.15x · High Contrast'}
+          </p>
         </div>
 
         <div>
