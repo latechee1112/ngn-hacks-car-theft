@@ -391,7 +391,7 @@ function App() {
             // the stutter this loop is designed to remove.
             className="pointer-events-none fixed top-0 left-0 z-50 h-[350px] w-[350px] opacity-0 transition-opacity duration-200 ease-out will-change-transform"
           >
-            <div className="gaze-blob-morph absolute inset-0 bg-[radial-gradient(circle,_rgb(94_211_255_/_55%)_0%,_rgb(94_211_255_/_22%)_45%,_transparent_75%)]" />
+            <div className="gaze-blob-morph absolute inset-0" />
           </div>
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">

@@ -26,11 +26,11 @@ export const GAZE_VIDEO_ID = 'distill-gaze-video'
 
 // WebcamClient drives the callback from requestAnimationFrame. The package's
 // advertised worker is missing from its published bundle, so MediaPipe + TFJS
-// inference runs on the UI thread. Fifteen samples per second is responsive
+// inference runs on the UI thread. Ten samples per second is responsive
 // enough for gaze calibration while leaving regular frames for React, CSS and
 // input. The in-flight guard in start() is equally important: without it a
 // slow inference can overlap the next one and saturate the page completely.
-const MIN_FRAME_INTERVAL_MS = 1000 / 15
+const MIN_FRAME_INTERVAL_MS = 1000 / 10
 
 // How many recent open-eye frames registerCalibrationPoint feeds to a
 // single dot's fit. handleClick() (the library's own entry point) only ever
@@ -41,10 +41,10 @@ const MIN_FRAME_INTERVAL_MS = 1000 / 15
 // of samples for one label, which both the closed-form affine fit and the
 // gradient step use directly - more, consistent samples per dot materially
 // improves calibration accuracy over a single frame. At MIN_FRAME_INTERVAL_MS
-// (~15Hz) this is roughly the last 800ms of fixation on the dot - sized to
+// (~10Hz) this is roughly the last 800ms of fixation on the dot - sized to
 // use nearly the whole CALIBRATION_DOT_INTERVAL_MS dwell instead of only its
 // tail.
-const CALIBRATION_SAMPLE_BUFFER_SIZE = 12
+const CALIBRATION_SAMPLE_BUFFER_SIZE = 8
 
 // Rejects samples whose headVector is far from the buffer's own median -
 // catches a stray head-turn or landmark glitch mid-dwell without needing a

@@ -129,6 +129,15 @@ body {
 
 .gaze-blob-morph {
   border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+  background: radial-gradient(
+    circle,
+    rgb(94 211 255 / 55%) 0%,
+    rgb(94 211 255 / 34%) 38%,
+    rgb(94 211 255 / 14%) 58%,
+    transparent 82%
+  );
+  -webkit-mask-image: radial-gradient(circle, #000 0%, #000 42%, rgb(0 0 0 / 55%) 62%, transparent 84%);
+  mask-image: radial-gradient(circle, #000 0%, #000 42%, rgb(0 0 0 / 55%) 62%, transparent 84%);
   animation: gaze-blob-morph 11s ease-in-out infinite;
   will-change: transform;
 }
