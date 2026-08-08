@@ -40,7 +40,9 @@ interface StoredSettings {
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
-  intensity: 50,
+  // 75% - deemphasized content should read as strongly blurred/censored the
+  // first time a page is simplified, before the user touches the slider.
+  intensity: 75,
   reduceMotion: true,
   increaseSpacing: true,
 }
