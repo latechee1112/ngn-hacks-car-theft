@@ -532,7 +532,7 @@ html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}][${MIN_TEXT_ATTR}] .${MIN_TEXT_CLASS} {
    longhand non-important is safe - there's no host-page rule to lose a fight to. */
 html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} {
   opacity: 0.4 !important;
-  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
+  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) !important;
   transition-property: opacity, filter !important;
   transition-duration: 0.6s, 0.6s !important;
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1), cubic-bezier(0.22, 1, 0.36, 1) !important;
@@ -540,7 +540,7 @@ html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} {
 }
 html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS}:hover {
   opacity: 0.85 !important;
-  filter: grayscale(60%) !important;
+  filter: none !important;
 }
 /* The "Show original page" undo, playing in reverse of the reveal cascade above:
    restoreOriginalPageAnimated() sets RESTORING_ATTR and a fresh --distill-reveal-delay
@@ -589,7 +589,7 @@ html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS},
 html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} a[href],
 html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} button,
 html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} img {
-  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
+  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) !important;
   transition: filter 0.2s ease, opacity 0.2s ease !important;
 }
 html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} {
@@ -622,12 +622,16 @@ html[${REVEAL_ATTR}] .${UNSTICK_STICKY_CLASS} {
   top: auto !important;
   bottom: auto !important;
 }
-/* Desaturating the rendered primary region reduces every source of color
-   variation (text, backgrounds, borders and media) while preserving each
-   site's existing luminance and contrast. The previous fixed text color was
-   nearly invisible on dark pages and left most of the page's color untouched. */
-html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${NEUTRAL_COLOR_CLASS} {
-  filter: grayscale(100%) !important;
+/* Text only - no filter. color has no effect on img/video/svg/canvas pixels to begin
+   with, so there is nothing here that needs to steer around media the way the old
+   grayscale() filter did. Has to repeat with a '*' descendant selector, not just rely
+   on inheritance from the first rule: an inherited value only applies where nothing
+   else in the cascade sets that property, and a host page's own link-color rule (no
+   !important needed) counts as such a value - it wins over inheriting the ancestor's
+   forced black regardless of how strong that ancestor's own !important is. */
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${NEUTRAL_COLOR_CLASS},
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${NEUTRAL_COLOR_CLASS} * {
+  color: #000 !important;
 }
 html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):not(button a) {
   text-decoration: underline !important;
@@ -988,7 +992,8 @@ export function canReduceColorVariation(): boolean {
 }
 
 export function isColorVariationReduced(): boolean {
-  return isSimplificationActive() && getColorReductionTargets().every((el) => el.classList.contains(NEUTRAL_COLOR_CLASS))
+  const targets = getColorReductionTargets()
+  return isSimplificationActive() && targets.length > 0 && targets.every((el) => el.classList.contains(NEUTRAL_COLOR_CLASS))
 }
 
 // Toggles desaturation across every primary region. There can be more than one

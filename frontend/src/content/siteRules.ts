@@ -36,6 +36,9 @@ export interface SiteRule {
   // Everything matching these is blurred. Missing selectors are simply skipped, so
   // a Devpost markup change degrades to "blurs less", never to a broken page.
   blurSelectors: string[]
+  // Same job as blurSelectors for targets that CSS cannot identify reliably, such as
+  // AccuWeather's generic paragraph whose bracket-wrapped text is the only identifier.
+  blurMatcher?: () => Element[]
   // Elements that must stay sharp and clickable. A CSS filter on an ancestor blurs
   // its whole subtree and a child cannot opt out, so this can't be a style rule — it
   // clears the blur classes off each match's ancestor chain instead. blurSelectors
@@ -47,11 +50,21 @@ export interface SiteRule {
   // the column squeezes the whole page into a strip and wraps the rail one word per
   // line. On a hand-tuned page the blur is the whole intended change.
   disableReadingColumn?: boolean
-  // Same job as keepSharpSelectors, for a target no static CSS selector can name —
-  // e.g. AccuWeather's inline "further reading" callouts, which carry no distinguishing
-  // class and are only recognizable by their own bracket-wrapped text convention.
+  // Same job as keepSharpSelectors, for a target no static CSS selector can name.
   keepSharpMatcher?: () => Element[]
+  // Roots to scale up by TEXT_BOOST_SCALE, e.g. Wikipedia's article body once its own
+  // reading-preference panel (which offers the same text-size choice) is blurred away.
+  // A flat em multiplier on the root is enough here — unlike the generic pixel-based
+  // scan in simplify.ts's setLargerText(), which has to cope with arbitrary sites'
+  // nested em/rem quirks, a single hand-picked site has predictable, well-behaved CSS
+  // where child headings scaling proportionally off a larger parent em is the point,
+  // not compounding to guard against.
+  boostTextSelectors?: string[]
 }
+
+// Matches simplify.ts's own LARGER_TEXT_SCALE so a hardcoded boost reads the same as
+// the user-facing "Larger text" toggle.
+const TEXT_BOOST_SCALE = 1.2
 
 // --- Devpost project pages -------------------------------------------------
 // https://devpost.com/software/<slug>. Blurs the comparison/status surface — likes,
@@ -102,11 +115,9 @@ const DEVPOST_PROJECT: SiteRule = {
 // "further reading" citations inline in the article body as a bracket-wrapped
 // sentence — e.g. "[More wildfire coverage: <a>Before-and-after images...</a> |
 // <a>Check your local air quality</a>]" — with no distinguishing class name, just a
-// <p class="paragraph-block"> whose text starts with "[" and ends with "]". The
-// backend's link-density heuristic reads that the same as a bolted-on sidebar
-// "Related Stories" widget and deemphasizes it, blurring real editorial content.
-// There is no reliable CSS selector for "starts with [", so this is matched by
-// text rather than by keepSharpSelectors.
+// <p class="paragraph-block"> whose text starts with "[" and ends with "]".
+// There is no reliable CSS selector for "starts with [", so this is hardcoded with
+// a text matcher and deliberately sent through the hard-blur path.
 const ACCUWEATHER_INLINE_CALLOUT_PATTERN = /^\[[\s\S]*\]$/
 
 function findAccuWeatherInlineCallouts(): Element[] {
@@ -123,10 +134,38 @@ const ACCUWEATHER_ARTICLE: SiteRule = {
   pathPattern: /^\/en\/[^/]+\/[^/]+\/\d+\/?$/i,
   confirm: () => !!document.querySelector('.news-article'),
   blurSelectors: [],
-  keepSharpMatcher: findAccuWeatherInlineCallouts,
+  blurMatcher: findAccuWeatherInlineCallouts,
+  // Protect the article container from the generic link-density/secondary-content
+  // pass. Walking up from each image clears blur from its ancestors, while the
+  // bracketed callout remains a separately hard-blurred sibling.
+  keepSharpSelectors: ['.news-article img'],
 }
 
-const SITE_RULES: SiteRule[] = [DEVPOST_PROJECT, ACCUWEATHER_ARTICLE]
+// --- Wikipedia articles ------------------------------------------------------
+// https://<lang>.wikipedia.org/wiki/<title>. Vector 2022's "Appearance" panel
+// (Text size / Width / Color-scheme radios, pinned in the left rail or opened as a
+// dropdown) duplicates exactly the reading controls Distill's own sidepanel already
+// offers, so it's just a second settings surface competing for attention next to the
+// article. `.vector-appearance-landmark` matches both the pinned and unpinned copies
+// of the widget the skin ships; whichever one isn't currently rendered is caught and
+// dropped by applySiteRules()'s isVisible() check, so this needs no pinned/unpinned
+// branching of its own. Boosting #mw-content-text's own text size once the panel that
+// offered that exact choice is blurred keeps the "make it bigger" affordance available
+// through Distill's own control instead of one this rule just hid.
+const WIKIPEDIA_ARTICLE: SiteRule = {
+  name: 'wikipedia-article',
+  hostPattern: /(^|\.)wikipedia\.org$/i,
+  // Excludes Special:/Talk:/User:/Wikipedia:/Help:/Category:/Portal:/Template:/File:
+  // pages - those are project/meta pages, not articles, though the Appearance panel
+  // still gets hidden on them fine if this doesn't match; it just means this rule
+  // simply won't fire there.
+  pathPattern: /^\/wiki\/(?!(?:Special|Talk|User|Wikipedia|Help|Category|Portal|Template|File):)[^/]+\/?$/i,
+  confirm: () => !!document.getElementById('mw-content-text'),
+  blurSelectors: ['.vector-appearance-landmark'],
+  boostTextSelectors: ['#mw-content-text'],
+}
+
+const SITE_RULES: SiteRule[] = [DEVPOST_PROJECT, ACCUWEATHER_ARTICLE, WIKIPEDIA_ARTICLE]
 
 export function findSiteRule(loc: Location = window.location): SiteRule | null {
   return (
@@ -150,6 +189,9 @@ export function applySiteRules(): number {
       if (isVisible(el)) matched.add(el)
     })
   })
+  rule.blurMatcher?.().forEach((el) => {
+    if (isVisible(el)) matched.add(el)
+  })
 
   // Several selectors deliberately overlap (the comment composer is matched by both a
   // wrapper rule and the bare `form` fallback). CSS filters compound, so a target
@@ -169,8 +211,21 @@ export function applySiteRules(): number {
   })
 
   keepSharp(rule)
+  boostText(rule)
 
   return targets.length
+}
+
+// Flat em multiplier on each root — cheap, and correct for a hand-picked site whose
+// own CSS already scales nested headings proportionally off their parent's font-size.
+function boostText(rule: SiteRule): void {
+  rule.boostTextSelectors?.forEach((selector) => {
+    document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      if (!isVisible(el)) return
+      saveOriginal(el)
+      el.style.setProperty('font-size', `${TEXT_BOOST_SCALE}em`, 'important')
+    })
+  })
 }
 
 // Every class that can make an ancestor take its subtree down with it: the two blurs,
@@ -187,22 +242,27 @@ const SUPPRESSION_CLASSES = [
   UNSTICK_STICKY_CLASS,
 ]
 
-// Walks up from each keep-sharp element clearing those classes off the whole ancestor
-// chain, so nothing above it can blur or hide it by inheritance — whether that came
-// from our own selectors, the generic secondary pass (which sees #global-nav as a nav),
-// or a backend deemphasize/collapse. Runs after the blur pass, and applySiteRules()
-// itself runs last in both simplify paths, so this is the final word.
+// Walks up from each keep-sharp element clearing those classes off the ancestor chain,
+// so nothing above it can blur or hide it by inheritance — whether that came from our
+// own selectors, the generic secondary pass (which sees #global-nav as a nav), or a
+// backend deemphasize/collapse. Runs after the blur pass, and applySiteRules() itself
+// runs last in both simplify paths, so this is the final word.
+//
+// Stops (without clearing) at the first ancestor already carrying AD_HIDDEN_CLASS: a
+// keep-sharp selector like AccuWeather's '.news-article img' is meant to rescue article
+// content the generic pass misjudged as secondary, not to reach into a genuine ad/promo
+// widget that happens to nest a thumbnail inside the article and un-hide the whole
+// thing. The ad pass runs before this one and only fires on real ad markup, so a hit
+// here is trusted over a keep-sharp match found by walking through it.
 function keepSharp(rule: SiteRule): void {
-  rule.keepSharpSelectors?.forEach((selector) => {
-    document.querySelectorAll(selector).forEach((el) => {
-      for (let node: Element | null = el; node; node = node.parentElement) {
-        node.classList.remove(...SUPPRESSION_CLASSES)
-      }
-    })
-  })
-  rule.keepSharpMatcher?.().forEach((el) => {
+  const clearAncestors = (el: Element) => {
     for (let node: Element | null = el; node; node = node.parentElement) {
+      if (node !== el && node.classList.contains(AD_HIDDEN_CLASS)) break
       node.classList.remove(...SUPPRESSION_CLASSES)
     }
+  }
+  rule.keepSharpSelectors?.forEach((selector) => {
+    document.querySelectorAll(selector).forEach(clearAncestors)
   })
+  rule.keepSharpMatcher?.().forEach(clearAncestors)
 }

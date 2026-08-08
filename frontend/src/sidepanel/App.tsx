@@ -129,7 +129,7 @@ function App() {
   }
 
   function openCalibration() {
-    chrome.tabs.create({ url: chrome.runtime.getURL('calibration.html') }).catch(() => {})
+    chrome.tabs.create({ url: chrome.runtime.getURL('calibration.html') }).catch(() => { })
   }
 
   async function dismissCalibrationBanner() {
@@ -200,7 +200,7 @@ function App() {
     if (!settingsLoaded) return
     chrome.storage.local
       .set({ [SETTINGS_KEY]: { intensity, reduceMotion, largerText, reduceColorVariation: colorReductionActive } })
-      .catch(() => {})
+      .catch(() => { })
   }, [settingsLoaded, intensity, reduceMotion, largerText, colorReductionActive])
 
   async function simplifyPage() {
@@ -443,9 +443,8 @@ function App() {
             onClick={simplified ? restorePage : simplifyPage}
             disabled={analyzing}
             aria-busy={analyzing}
-            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium ${FOCUS_RING} ${
-              analyzing ? `cursor-wait ${GLASS_SECONDARY} text-on-surface-variant` : `${GLASS_ACCENT} text-accent-fg`
-            }`}
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium ${FOCUS_RING} ${analyzing ? `cursor-wait ${GLASS_SECONDARY} text-on-surface-variant` : `${GLASS_ACCENT} text-accent-fg`
+              }`}
           >
             {analyzing ? (
               <>
@@ -490,14 +489,13 @@ function App() {
           <div className="mb-2 flex items-center gap-2">
             <Icon name="user" className="text-on-surface-variant" />
             <h3 className="text-body font-medium text-on-surface">
-              {calibrationProfile ? 'Your Profile' : 'Default Profile'}
+              {calibrationProfile ? 'Your Profile' : 'Calibrated to Chenyu Lu'}
             </h3>
           </div>
           <p className="text-meta text-on-surface-variant">
             {calibrationProfile
-              ? `Spacing: +${Math.round((calibrationProfile.spacingMultiplier - 1) * 100)}% · Text: ${calibrationProfile.textScale}x · ${
-                  calibrationProfile.contrastMode === 'enhanced' ? 'High Contrast' : 'Standard Contrast'
-                }`
+              ? `Spacing: +${Math.round((calibrationProfile.spacingMultiplier - 1) * 100)}% · Text: ${calibrationProfile.textScale}x · ${calibrationProfile.contrastMode === 'enhanced' ? 'High Contrast' : 'Standard Contrast'
+              }`
               : 'Spacing: +40% · Text: 1.15x · High Contrast'}
           </p>
         </div>
@@ -593,9 +591,8 @@ function App() {
             onClick={dumpRawBlocks}
             disabled={dumping}
             aria-busy={dumping}
-            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium ${FOCUS_RING} ${
-              dumping ? `cursor-wait ${GLASS_SECONDARY} text-on-surface-variant` : `${GLASS_DEBUG} text-debug-fg`
-            }`}
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium ${FOCUS_RING} ${dumping ? `cursor-wait ${GLASS_SECONDARY} text-on-surface-variant` : `${GLASS_DEBUG} text-debug-fg`
+              }`}
           >
             {dumping ? (
               <>
