@@ -1,3 +1,11 @@
 
 venv/
 env/
+
+# Environment / secrets — never commit real values.
+# .env.* is ignored broadly; the two lines below explicitly un-ignore the
+# checked-in templates (no real secrets, safe to track).
+.env
+.env.*
+!.env.example
+!.env.*.example

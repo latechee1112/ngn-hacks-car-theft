@@ -24,15 +24,22 @@
 const SCAN_HOST_TAG = 'distill-scan'
 const SCAN_HOST_ID = 'distill-scan-layer'
 
-const SWEEP_MS = 380
-const TOTAL_MS = 620
-const REDUCED_MS = 240
+const SWEEP_MS = 560
+const TOTAL_MS = 900
+const REDUCED_MS = 320
 
-const GRID_CELL = 32
-const LINE = 'rgba(120, 176, 232, 0.38)'
-const WASH = 'rgba(47, 111, 181, 0.07)'
-const BEAM = 'rgba(140, 196, 240, 0.95)'
-const BEAM_GLOW = 'rgba(47, 111, 181, 0.32)'
+// Two-tier mesh: fine cells inside heavier major cells. Reads as a denser,
+// more deliberate scan than a single grid at the same line weight would.
+const GRID_MAJOR = 32
+const GRID_MINOR = 8
+const LINE_MAJOR = 'rgba(126, 182, 236, 0.55)'
+const LINE_MINOR = 'rgba(126, 182, 236, 0.16)'
+const WASH = 'rgba(47, 111, 181, 0.11)'
+const BEAM = 'rgba(186, 222, 250, 0.98)'
+const BEAM_GLOW = 'rgba(90, 158, 224, 0.55)'
+const BEAM_BLOOM = 'rgba(47, 111, 181, 0.28)'
+const TRAIL = 'rgba(64, 132, 200, 0.30)'
+const TRAIL_HEIGHT = 160
 
 function prefersReducedMotion(): boolean {
   // Both the OS setting and Distill's own reduce-motion state suppress the
@@ -66,10 +73,17 @@ function styleText(reduced: boolean): string {
   position: absolute;
   inset: 0;
   background-color: ${WASH};
+  /* Major lines painted over minor: first image in the list wins. */
   background-image:
-    linear-gradient(to right, ${LINE} 1px, transparent 1px),
-    linear-gradient(to bottom, ${LINE} 1px, transparent 1px);
-  background-size: ${GRID_CELL}px ${GRID_CELL}px;
+    linear-gradient(to right, ${LINE_MAJOR} 1px, transparent 1px),
+    linear-gradient(to bottom, ${LINE_MAJOR} 1px, transparent 1px),
+    linear-gradient(to right, ${LINE_MINOR} 1px, transparent 1px),
+    linear-gradient(to bottom, ${LINE_MINOR} 1px, transparent 1px);
+  background-size:
+    ${GRID_MAJOR}px ${GRID_MAJOR}px,
+    ${GRID_MAJOR}px ${GRID_MAJOR}px,
+    ${GRID_MINOR}px ${GRID_MINOR}px,
+    ${GRID_MINOR}px ${GRID_MINOR}px;
   clip-path: inset(0 0 100% 0);
   animation: ${gridAnimation};
 }
@@ -78,11 +92,21 @@ function styleText(reduced: boolean): string {
   left: 0;
   right: 0;
   top: 0;
-  height: 2px;
+  height: 3px;
   background: ${BEAM};
-  box-shadow: 0 0 12px 2px ${BEAM_GLOW};
-  transform: translateY(-2px);
+  box-shadow: 0 0 18px 3px ${BEAM_GLOW}, 0 0 44px 12px ${BEAM_BLOOM};
+  transform: translateY(-3px);
   animation: distill-scan-sweep ${SWEEP_MS}ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+/* Body trailing the leading edge, over the region already resolved. */
+.beam::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: ${TRAIL_HEIGHT}px;
+  background: linear-gradient(to top, ${TRAIL}, transparent);
 }
 
 /* Same duration and easing as .beam, so the leading edge of the grid and the
@@ -92,7 +116,7 @@ function styleText(reduced: boolean): string {
   to   { clip-path: inset(0 0 0% 0); }
 }
 @keyframes distill-scan-sweep {
-  from { transform: translateY(-2px); opacity: 1; }
+  from { transform: translateY(-3px); opacity: 1; }
   85%  { opacity: 1; }
   to   { transform: translateY(100vh); opacity: 0; }
 }
