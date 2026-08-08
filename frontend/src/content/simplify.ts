@@ -321,7 +321,6 @@ function deemphasizeSecondary(primary: Element | null): number {
 export interface PrefilterResult {
   adsHidden: number
   deemphasized: number
-  siteRuleBlurred: number
 }
 
 export function prefilterPage(): PrefilterResult {
@@ -330,13 +329,15 @@ export function prefilterPage(): PrefilterResult {
   // article detector supplies the "don't touch this" region for both passes.
   const primary = findPrimaryContent()
   const adsHidden = hideAds(primary)
-  const deemphasized = deemphasizeSecondary(primary)
-  // Hand-tuned per-site regions (see siteRules.ts). Runs last so it can blur things
-  // the generic passes deliberately left alone, and uses its own class so the
-  // backend's block actions never clear it.
-  const siteRuleBlurred = applySiteRules()
+  // On a hand-tuned page, no blur at all during the loading phase: the guessed
+  // pre-filter blur would land first, then get corrected a second or two later when
+  // the analysis returns, and what the user sees is the page flickering between two
+  // different blurs. Deferring it means the page sits sharp while the scan runs and
+  // blurs once, in its final state. Ads still go immediately — that's a removal, not
+  // a blur, and nothing later revises it.
+  const deemphasized = findSiteRule() ? 0 : deemphasizeSecondary(primary)
   startAdObserver()
-  return { adsHidden, deemphasized, siteRuleBlurred }
+  return { adsHidden, deemphasized }
 }
 
 function hideAds(primary: Element | null, roots?: Element[]): number {
@@ -643,9 +644,10 @@ export function applySimplification(): SimplifyResult {
 
   pauseAutoplayMedia()
   injectGlobalStyle()
-  // Re-asserted after the backend's actions (and after the local heuristic), so a
-  // 'keep'/'emphasize' on a block that overlaps a hand-tuned region can't un-blur it:
-  // a hardcoded rule is a deliberate choice and outranks any inference. Idempotent.
+  // The only place the hand-tuned blur is applied: after the analysis, so the page
+  // never flickers mid-load, and last, so a backend 'keep'/'emphasize' on a block
+  // that overlaps a hand-tuned region can't un-blur it — a hardcoded rule is a
+  // deliberate choice and outranks any inference.
   applySiteRules()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
@@ -718,9 +720,10 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
 
   pauseAutoplayMedia()
   injectGlobalStyle()
-  // Re-asserted after the backend's actions (and after the local heuristic), so a
-  // 'keep'/'emphasize' on a block that overlaps a hand-tuned region can't un-blur it:
-  // a hardcoded rule is a deliberate choice and outranks any inference. Idempotent.
+  // The only place the hand-tuned blur is applied: after the analysis, so the page
+  // never flickers mid-load, and last, so a backend 'keep'/'emphasize' on a block
+  // that overlaps a hand-tuned region can't un-blur it — a hardcoded rule is a
+  // deliberate choice and outranks any inference.
   applySiteRules()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')

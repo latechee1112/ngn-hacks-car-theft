@@ -61,6 +61,15 @@ const DEVPOST_PROJECT: SiteRule = {
     '#app-team',
     // Bottom bar: Like button, "N people like this", liker avatars.
     '#share-and-like',
+    // The "write a comment" composer under the updates. Devpost only renders the
+    // form when you're signed in and shows a "Log in ... to join the conversation"
+    // line when you're not, so both shapes are listed. The :has() rules climb to the
+    // row that holds the avatar next to the box, since the avatar sits outside the
+    // <form> itself; the bare `form` entry is the fallback if that markup changes.
+    '.software-update-comments .media:has(form)',
+    '.software-update-comments li:has(form)',
+    '.software-update-comments form',
+    '.join-the-conversation',
   ],
   // The story and the "Submitted to"/"Created by" rail are siblings inside one grid;
   // isProseLike() sees enough prose to claim the whole thing and narrows it.
@@ -85,12 +94,20 @@ export function applySiteRules(): number {
   const rule = findSiteRule()
   if (!rule) return 0
 
-  const targets = new Set<Element>()
+  const matched = new Set<Element>()
   rule.blurSelectors.forEach((selector) => {
     document.querySelectorAll(selector).forEach((el) => {
-      if (isVisible(el)) targets.add(el)
+      if (isVisible(el)) matched.add(el)
     })
   })
+
+  // Several selectors deliberately overlap (the comment composer is matched by both a
+  // wrapper rule and the bare `form` fallback). CSS filters compound, so a target
+  // inside another target would come out blurred twice as hard — keep only the
+  // outermost of each nest.
+  const targets = Array.from(matched).filter(
+    (el) => !Array.from(matched).some((other) => other !== el && other.contains(el)),
+  )
 
   targets.forEach((el) => {
     saveOriginal(el)
@@ -101,5 +118,5 @@ export function applySiteRules(): number {
     el.classList.add(HARD_BLUR_CLASS)
   })
 
-  return targets.size
+  return targets.length
 }
