@@ -11,7 +11,7 @@ import {
 import { combineGazeStats, computeTrialGazeStats, type TrialGazeStats } from './gaze/aggregate'
 import DotCalibration from './gaze/DotCalibration'
 import { toPagePoint, type PageGazePoint } from './gaze/hitTest'
-import { useGazeTracker } from './gaze/useGazeTracker'
+import { GAZE_VIDEO_ID, useGazeTracker } from './gaze/useGazeTracker'
 import TrialTask from './TrialTask'
 import { TRIALS } from './trials'
 
@@ -80,14 +80,20 @@ function SecondaryButton({ onClick, children }: { onClick: () => void; children:
   )
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, showGlow = false }: { children: React.ReactNode; showGlow?: boolean }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-background px-6 py-16 text-center">
-      <div className="flex items-center gap-2 text-on-surface-variant">
+    <div className="relative isolate flex min-h-screen flex-col items-center justify-center gap-8 overflow-hidden bg-background px-6 py-16 text-center">
+      {showGlow && (
+        <>
+          <div className="bg-glow bg-glow-top" aria-hidden="true" />
+          <div className="bg-glow bg-glow-bottom" aria-hidden="true" />
+        </>
+      )}
+      <div className="relative z-10 flex items-center gap-2 text-on-surface-variant">
         <Icon name="funnel" />
         <span className="text-meta font-semibold tracking-[0.08em] uppercase">Distill</span>
       </div>
-      <div className="flex w-full max-w-lg flex-col items-center gap-6">{children}</div>
+      <div className="relative z-10 flex w-full max-w-lg flex-col items-center gap-6">{children}</div>
     </div>
   )
 }
@@ -105,10 +111,20 @@ function App() {
   const gazeSamplesRef = useRef<PageGazePoint[]>([])
   const trialGazeStatsRef = useRef<TrialGazeStats[]>([])
   const trialStartRef = useRef(0)
+  // Live gaze-position dot: written to directly via style.transform on every
+  // sample (~24Hz) rather than React state, so it doesn't re-render the tree
+  // on every frame - same imperative-ref pattern as gazeSamplesRef above.
+  const gazeDotRef = useRef<HTMLDivElement | null>(null)
 
   const handleGazeSample = useCallback((result: GazeResult, capturedAt: number) => {
     const point = toPagePoint(result, capturedAt)
-    if (point) gazeSamplesRef.current.push(point)
+    if (point) {
+      gazeSamplesRef.current.push(point)
+      if (gazeDotRef.current) {
+        gazeDotRef.current.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%)`
+        gazeDotRef.current.style.opacity = '1'
+      }
+    }
   }, [])
 
   const tracker = useGazeTracker(handleGazeSample)
@@ -187,9 +203,16 @@ function App() {
     submit(trials)
   }
 
+  // Renders the per-step screen. Kept as a nested function (rather than
+  // inline in the final return) so the <video> element below can sit
+  // outside this step-conditional entirely - it must stay mounted across
+  // the 'gazeCalibration' -> 'trials' transition (see GAZE_VIDEO_ID's
+  // comment in useGazeTracker.ts), which an early-return per step here
+  // would otherwise defeat by unmounting the whole tree on every step change.
+  function renderStep() {
   if (step === 'welcome') {
     return (
-      <Shell>
+      <Shell showGlow>
         <h1 className="text-title font-semibold text-on-background">Let's set up Distill for you</h1>
         <p className="text-body text-on-surface-variant">
           A few quick tasks (about a minute) tell Distill how you scan a page, so it can pick spacing, contrast,
@@ -233,6 +256,13 @@ function App() {
   if (step === 'trials') {
     return (
       <Shell>
+        {gazeEnabledRef.current && (
+          <div
+            ref={gazeDotRef}
+            aria-hidden="true"
+            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity] duration-150"
+          />
+        )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
           Step {trialIndex + 1} of {TRIALS.length}
         </p>
@@ -298,6 +328,26 @@ function App() {
       </ul>
       <PrimaryButton onClick={() => window.close()}>Close this tab</PrimaryButton>
     </Shell>
+  )
+  }
+
+  // The camera feed itself: must stay mounted for the tracker's whole
+  // lifetime (see GAZE_VIDEO_ID's comment in useGazeTracker.ts), so it lives
+  // here rather than inside any per-step screen - visible in the corner only
+  // during calibration, visually hidden (but still playing) afterwards.
+  return (
+    <>
+      <video
+        id={GAZE_VIDEO_ID}
+        autoPlay
+        muted
+        playsInline
+        className={
+          step === 'gazeCalibration' ? 'fixed top-4 right-4 h-24 w-32 rounded-md object-cover' : 'sr-only'
+        }
+      />
+      {renderStep()}
+    </>
   )
 }
 

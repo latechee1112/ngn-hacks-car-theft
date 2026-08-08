@@ -16,6 +16,24 @@ import { WebEyeTrack, WebcamClient, type GazeResult } from 'webeyetrack'
 // our own 9 calibration dots, never for trial/decoy clicks.
 const MAX_CALIBRATION_POINTS = 9
 
+// Shared with App.tsx, which owns the actual <video> element - it must stay
+// mounted for the tracker's whole lifetime (calibration AND trials), not
+// just while DotCalibration is on screen. WebcamClient's frame loop checks
+// `this.videoElement.paused` every tick and silently no-ops otherwise; a
+// <video> torn down by React on a step change stalls playback, which reads
+// as "gaze samples just stop arriving" with no error anywhere.
+export const GAZE_VIDEO_ID = 'distill-gaze-video'
+
+// WebcamClient drives the frame callback off requestAnimationFrame (so up to
+// display refresh rate, typically 60Hz) with no throttling of its own.
+// step() does a synchronous MediaPipe FaceLandmarker pass + a TFJS BlazeGaze
+// forward pass on the main thread every single call, for the whole
+// calibration+trials session - gaze position doesn't need to be resolved
+// faster than the eye can meaningfully move between samples, so gating to a
+// fixed interval here cuts main-thread inference load without losing
+// tracking responsiveness.
+const MIN_FRAME_INTERVAL_MS = 1000 / 24
+
 export interface GazeTracker {
   ready: boolean
   start: (videoElementId: string) => Promise<void>
@@ -40,8 +58,12 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
 
       const webcam = new WebcamClient(videoElementId)
       webcamRef.current = webcam
+      let lastProcessedAt = 0
       await webcam.startWebcam(async (frame, timestamp) => {
         if (!activeRef.current || !trackerRef.current) return
+        const now = performance.now()
+        if (now - lastProcessedAt < MIN_FRAME_INTERVAL_MS) return
+        lastProcessedAt = now
         const result = await trackerRef.current.step(frame, timestamp)
         // performance.now() at callback time, not GazeResult.timestamp
         // (which is relative to video start, a different clock than the

@@ -32,8 +32,12 @@ export function dotToNormalizedPoint(dot: CalibrationDot): [number, number] {
 
 // handleClick() debounces calls within 1000ms of each other (and ignores a
 // click within ~0.05 normalized units of the last one, which 9 spread-out
-// dots never trigger) - so consecutive dots must be spaced out at least this
-// long or a dot's calibration sample is silently dropped, not queued.
-export const CALIBRATION_DOT_DEBOUNCE_MS = 1000
-// Extra time to let the user actually fixate before we register the point.
-export const CALIBRATION_DOT_DWELL_MS = 900
+// dots never trigger) - so consecutive clicks must be spaced out at least
+// this long or a dot's calibration sample is silently dropped, not queued.
+// This single interval does double duty as both "time to let the user
+// fixate on the new dot" and "spacing since the previous click" - the two
+// used to be separate serial delays (900ms dwell + 1000ms debounce = 1900ms/
+// dot), but the dwell before a dot's click IS the gap since the previous
+// dot's click, so there's no need to wait twice. 50ms of margin over the
+// library's exact 1000ms floor absorbs setTimeout/render jitter.
+export const CALIBRATION_DOT_INTERVAL_MS = 1050

@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  CALIBRATION_DOT_DEBOUNCE_MS,
-  CALIBRATION_DOT_DWELL_MS,
-  CALIBRATION_DOTS,
-  dotToNormalizedPoint,
-} from './calibrationFit'
-import type { GazeTracker } from './useGazeTracker'
-
-const VIDEO_ID = 'distill-gaze-video'
+import { CALIBRATION_DOT_INTERVAL_MS, CALIBRATION_DOTS, dotToNormalizedPoint } from './calibrationFit'
+import { GAZE_VIDEO_ID, type GazeTracker } from './useGazeTracker'
 
 function DotCalibration({
   tracker,
@@ -24,7 +17,11 @@ function DotCalibration({
   useEffect(() => {
     if (startedRef.current) return
     startedRef.current = true
-    tracker.start(VIDEO_ID).catch((err) => onError(err instanceof Error ? err.message : String(err)))
+    // App.tsx renders the actual <video id={GAZE_VIDEO_ID}> element - it
+    // mounts in the same commit as this component (both appear together
+    // once step becomes 'gazeCalibration'), so it's already in the DOM by
+    // the time this effect runs.
+    tracker.start(GAZE_VIDEO_ID).catch((err) => onError(err instanceof Error ? err.message : String(err)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -35,14 +32,15 @@ function DotCalibration({
       return
     }
     const dot = CALIBRATION_DOTS[dotIndex]
-    // Dwell so the user has actually fixated before we register the point,
-    // then the library's own 1000ms click-debounce before advancing - two
-    // separate delays, both required (see calibrationFit.ts).
+    // Dwell on the new dot so the user has fixated before we register the
+    // point - this same wait also satisfies the library's 1000ms
+    // click-to-click debounce floor, so advancing immediately after the
+    // click (rather than waiting again) is safe (see calibrationFit.ts).
     const dwell = window.setTimeout(() => {
       const [x, y] = dotToNormalizedPoint(dot)
       tracker.registerCalibrationPoint(x, y)
-      window.setTimeout(() => setDotIndex((i) => i + 1), CALIBRATION_DOT_DEBOUNCE_MS)
-    }, CALIBRATION_DOT_DWELL_MS)
+      setDotIndex((i) => i + 1)
+    }, CALIBRATION_DOT_INTERVAL_MS)
     return () => window.clearTimeout(dwell)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tracker.ready, dotIndex])
@@ -55,7 +53,6 @@ function DotCalibration({
         Look at each dot as it appears · {Math.min(dotIndex + 1, CALIBRATION_DOTS.length)} of{' '}
         {CALIBRATION_DOTS.length}
       </p>
-      <video id={VIDEO_ID} autoPlay muted playsInline className="fixed top-4 right-4 h-24 w-32 rounded-md object-cover" />
       {dotIndex < CALIBRATION_DOTS.length && (
         <div
           className="fixed h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent transition-all duration-300"
