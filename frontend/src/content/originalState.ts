@@ -35,3 +35,20 @@ export function restoreAllOriginal(): void {
 export function hasSavedOriginals(): boolean {
   return originalMap.size > 0
 }
+
+// A Map holds its keys strongly, so every element ever snapshotted stays reachable
+// until restore clears the map. That is fine for a static page, but a virtualized
+// feed recycles cards continuously — the ad observer snapshots each new one — and
+// the map would pin every removed node for the lifetime of the page. Elements no
+// longer in the document can never be restored anyway, so dropping them costs
+// nothing. Called from the observer's rescan, where the churn actually happens.
+export function pruneDetachedOriginals(): number {
+  let removed = 0
+  originalMap.forEach((_snapshot, el) => {
+    if (!el.isConnected) {
+      originalMap.delete(el)
+      removed++
+    }
+  })
+  return removed
+}

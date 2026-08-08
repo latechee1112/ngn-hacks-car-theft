@@ -16,6 +16,27 @@ export const FF_ID_ATTR = 'data-distill-id'
 const TEXT_MAX = 300
 const LINK_GROUP_MIN_LINKS = 4
 
+// Hard ceiling on what one analysis request may contain. Two separate limits make
+// this necessary, and the tighter one is time, not count:
+//
+//   - The backend rejects anything over max_blocks_per_request (150) with 413.
+//   - Analysis latency is linear in block count, measured against this backend at
+//     roughly 0.5s/block: 20 blocks -> 15s, 60 -> 31s, 150 -> over 90s. The service
+//     worker gives up at ANALYZE_TIMEOUT_MS (60s), so a 150-block payload never
+//     returns an answer at all.
+//
+// Either way a request that is too big means no LLM analysis: the extension falls
+// back to the local heuristic and the user is never told why. So the budget is
+// enforced here by dropping the least significant blocks. 60 keeps the round-trip
+// near half a minute with comfortable headroom under the timeout. Raise it only
+// alongside ANALYZE_TIMEOUT_MS, and only if the wait is acceptable.
+const MAX_BLOCKS = 60
+
+// Icons, spacers, tracking pixels: media small enough that it carries no reading
+// content. One article contributed 47 <svg> blocks this way, all of them chrome.
+const MIN_MEDIA_AREA = 2500
+const MEDIA_TAGS = ['img', 'svg', 'picture', 'video', 'iframe', 'embed']
+
 // Broad net of tags/attributes worth inspecting. isExtractable() does the real filtering.
 const CANDIDATE_SELECTOR = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -31,6 +52,17 @@ const CANDIDATE_SELECTOR = [
 ].join(',')
 
 const VIDEO_EMBED_PATTERN = /youtube|vimeo|player/i
+
+// Tiny media is dropped outright rather than ranked: it is never the answer to
+// "what is this page about", and every one of them costs a block of the budget.
+// Ad-network frames are the exception — a 1x1 iframe is exactly what a tracker
+// looks like, and the backend should still be told about it.
+function isDecorativeMedia(el: Element): boolean {
+  if (!MEDIA_TAGS.includes(el.tagName.toLowerCase())) return false
+  if (isAdLike(el)) return false
+  const rect = el.getBoundingClientRect()
+  return rect.width * rect.height < MIN_MEDIA_AREA
+}
 
 function isExtractable(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
@@ -249,6 +281,40 @@ function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: 
   }
 }
 
+// Safety-critical blocks are never candidates for eviction: the backend's whole
+// protection contract (never collapse a consent banner, a warning, a password or
+// payment field) depends on those blocks being in the payload it reasons over.
+function isSafetyCritical(block: PageBlock): boolean {
+  return block.isPasswordField || block.isPaymentField || block.isConsentControl || block.isWarning
+}
+
+// What survives the budget. Screen area is the primary signal — a page's real
+// content is the part that occupies it — with text length as the tiebreaker
+// between equally sized blocks and a small nudge for semantic landmarks. Ads and
+// sticky promos are scored too rather than dropped: knowing where the noise is
+// is what lets the backend deemphasize it.
+function blockScore(block: PageBlock): number {
+  if (isSafetyCritical(block)) return Number.POSITIVE_INFINITY
+  const box = block.boundingBox
+  const area = box ? box.width * box.height : 0
+  const textWeight = Math.min(block.text.length, TEXT_MAX) / TEXT_MAX
+  const landmarkBonus = block.landmark ? 0.15 : 0
+  return area * 2 + textWeight + landmarkBonus
+}
+
+// Trims to MAX_BLOCKS by significance, then restores document order — the backend
+// keys off blockId so order is not load-bearing, but a payload that reads
+// top-to-bottom gives the LLM the page's actual structure to reason about.
+function applyBlockBudget(blocks: PageBlock[]): PageBlock[] {
+  if (blocks.length <= MAX_BLOCKS) return blocks
+  const order = new Map(blocks.map((b, i) => [b.blockId, i]))
+  return blocks
+    .slice()
+    .sort((a, b) => blockScore(b) - blockScore(a))
+    .slice(0, MAX_BLOCKS)
+    .sort((a, b) => (order.get(a.blockId) ?? 0) - (order.get(b.blockId) ?? 0))
+}
+
 export function extractPage(): ExtractionResult {
   const seen = new Set<Element>()
   const blocks: PageBlock[] = []
@@ -261,6 +327,7 @@ export function extractPage(): ExtractionResult {
   // also covers their still-laid-out descendants.
   document.querySelectorAll(CANDIDATE_SELECTOR).forEach((el) => {
     if (seen.has(el) || !isVisible(el) || !isExtractable(el) || isPrefilteredAd(el)) return
+    if (isDecorativeMedia(el)) return
     seen.add(el)
     blocks.push(buildBlock(el, counter))
   })
@@ -271,10 +338,15 @@ export function extractPage(): ExtractionResult {
     blocks.push(buildBlock(el, counter, { repeatedLink: true }))
   })
 
+  const budgeted = applyBlockBudget(blocks)
+  if (budgeted.length < blocks.length) {
+    console.log(`[Distill] extraction trimmed ${blocks.length} blocks to ${budgeted.length} to fit the analysis budget`)
+  }
+
   return {
     url: window.location.href,
     extractedAt: Date.now(),
-    blocks,
+    blocks: budgeted,
     hasSensitiveForms: detectSensitiveForms(),
   }
 }

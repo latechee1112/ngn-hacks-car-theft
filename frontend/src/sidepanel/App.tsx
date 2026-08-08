@@ -86,7 +86,7 @@ function App() {
     try {
       const tabId = await getActiveTabId()
       if (!tabId) return
-      const response = (await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_STATUS' })) as {
+      const response = (await sendToTab(tabId, { type: 'DISTILL_STATUS' })) as {
         simplified: boolean
         colorReductionAvailable: boolean
         colorReductionActive: boolean
@@ -154,7 +154,7 @@ function App() {
         setError('No active tab found')
         return
       }
-      const response = (await chrome.tabs.sendMessage(tabId, {
+      const response = (await sendToTab(tabId, {
         type: 'DISTILL_SIMPLIFY',
         settings: {
           // Slider is 1-100; the backend's VisualProfile wants 0.0-1.0.
@@ -182,7 +182,7 @@ function App() {
         setError('No active tab found')
         return
       }
-      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_RESTORE' })
+      await sendToTab(tabId, { type: 'DISTILL_RESTORE' })
       setSimplified(false)
       setColorReductionAvailable(false)
       setColorReductionActive(false)
@@ -248,7 +248,7 @@ function App() {
     try {
       const tabId = await getActiveTabId()
       if (!tabId) return
-      await chrome.tabs.sendMessage(tabId, { type, enabled })
+      await sendToTab(tabId, { type, enabled })
     } catch {
       // No content script on this tab (chrome:// page, PDF viewer, etc.).
       // The preference is still stored and still applies on the next page.
@@ -274,7 +274,7 @@ function App() {
     try {
       const tabId = await getActiveTabId()
       if (!tabId) return
-      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_SET_BLUR', intensity: next / 100 })
+      await sendToTab(tabId, { type: 'DISTILL_SET_BLUR', intensity: next / 100 })
     } catch {
       // No content script on this tab. The value is still stored and still
       // applies the next time a page is simplified.
@@ -289,7 +289,7 @@ function App() {
         setError('No active tab found')
         return
       }
-      const response = (await chrome.tabs.sendMessage(tabId, {
+      const response = (await sendToTab(tabId, {
         type: 'DISTILL_SET_COLOR_REDUCTION',
         enabled,
       })) as { applied: boolean; active: boolean }
@@ -307,7 +307,7 @@ function App() {
         setError('No active tab found')
         return
       }
-      const response = (await chrome.tabs.sendMessage(tabId, {
+      const response = (await sendToTab(tabId, {
         type: 'DISTILL_SET_PROGRESSIVE_REVEAL',
         enabled,
       })) as { applied: boolean; active: boolean }

@@ -10,7 +10,7 @@ import {
   isVisible,
 } from './dom-heuristics'
 import { FF_ID_ATTR } from './extract'
-import { restoreAllOriginal, saveOriginal } from './originalState'
+import { pruneDetachedOriginals, restoreAllOriginal, saveOriginal } from './originalState'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
 const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
@@ -86,8 +86,19 @@ function markPrimary(el: Element): void {
 
 // Prevents nested targets (e.g. an ad div inside an aside) from having opacity applied
 // twice — CSS opacity compounds with ancestors, which would make nested targets vanish.
+//
+// Marks the candidates and asks the DOM which ones have a marked ancestor, rather than
+// comparing every pair: the pairwise form is O(n²) contains() calls, and a feed page
+// produces hundreds of candidates. closest() walks ancestors instead, so this is
+// O(n × depth). The attribute is transient — set and removed inside this function —
+// and the ad observer watches childList only, so it cannot retrigger anything.
+const NESTING_MARK_ATTR = 'data-distill-nesting-mark'
+
 function pruneNested(elements: Element[]): Element[] {
-  return elements.filter((el) => !elements.some((other) => other !== el && other.contains(el)))
+  elements.forEach((el) => el.setAttribute(NESTING_MARK_ATTR, ''))
+  const outermost = elements.filter((el) => !el.parentElement?.closest(`[${NESTING_MARK_ATTR}]`))
+  elements.forEach((el) => el.removeAttribute(NESTING_MARK_ATTR))
+  return outermost
 }
 
 function collectNoiseTargets(primary: Element | null): Element[] {
@@ -169,10 +180,15 @@ function findAdCard(label: Element, primary: Element | null): Element {
   return el
 }
 
-function collectAdTargets(primary: Element | null): Element[] {
+// `roots` scopes the scan. The first pass covers the whole document; rescans driven
+// by the observer pass only the subtrees that were actually inserted, which is what
+// keeps an infinite feed from re-querying every element on the page as you scroll.
+function collectAdTargets(primary: Element | null, roots: Element[] = [document.documentElement]): Element[] {
   const targets = new Set<Element>()
 
   const consider = (el: Element) => {
+    // Already resolved by an earlier pass — the expensive checks below can be skipped.
+    if (el.classList.contains(AD_HIDDEN_CLASS) || el.closest(`.${AD_HIDDEN_CLASS}`)) return
     if (isProtectedFromSimplification(el)) return
     // The primary content itself is never an ad, and hiding an ancestor of it
     // would blank the page.
@@ -181,13 +197,21 @@ function collectAdTargets(primary: Element | null): Element[] {
     targets.add(el)
   }
 
-  document.querySelectorAll(AD_CANDIDATE_SELECTOR).forEach((el) => {
-    if (isAdLike(el) || isAdNetworkFrame(el)) consider(el)
-  })
+  const scan = (root: Element, selector: string, handle: (el: Element) => void) => {
+    // querySelectorAll skips the root itself, but an inserted node is very often
+    // exactly the ad card, so it has to be tested directly.
+    if (root.matches(selector)) handle(root)
+    root.querySelectorAll(selector).forEach(handle)
+  }
 
-  document.querySelectorAll(SPONSORED_LABEL_SELECTOR).forEach((el) => {
-    if (!isSponsoredLabel(el)) return
-    consider(findAdCard(el, primary))
+  roots.forEach((root) => {
+    if (!root.isConnected) return
+    scan(root, AD_CANDIDATE_SELECTOR, (el) => {
+      if (isAdLike(el) || isAdNetworkFrame(el)) consider(el)
+    })
+    scan(root, SPONSORED_LABEL_SELECTOR, (el) => {
+      if (isSponsoredLabel(el)) consider(findAdCard(el, primary))
+    })
   })
 
   return pruneNested(Array.from(targets))
@@ -306,8 +330,8 @@ export function prefilterPage(): PrefilterResult {
   return { adsHidden, deemphasized }
 }
 
-function hideAds(primary: Element | null): number {
-  const targets = collectAdTargets(primary)
+function hideAds(primary: Element | null, roots?: Element[]): number {
+  const targets = collectAdTargets(primary, roots)
   targets.forEach((el) => {
     saveOriginal(el)
     el.classList.add(AD_HIDDEN_CLASS)
@@ -316,28 +340,48 @@ function hideAds(primary: Element | null): number {
 }
 
 // Feeds stream new promoted posts in as you scroll, so a one-shot sweep only holds
-// until the next page of results. Re-runs the sweep on DOM insertions, coalesced to
-// one pass per frame. Only childList is observed, so our own class changes can't
-// re-trigger it.
+// until the next page of results.
+//
+// Two things keep the rescan off the scroll path. It is debounced on idle rather than
+// run per frame — a feed mutates continuously while scrolling, and a per-frame
+// full-document sweep is felt as jank. And it scans only the subtrees that were
+// actually inserted, not the whole page. Only childList is observed, so our own class
+// changes can't re-trigger it.
+const AD_RESCAN_DEBOUNCE_MS = 250
 let adObserver: MutationObserver | null = null
+let rescanTimer = 0
+let pendingRoots: Element[] = []
 
 function startAdObserver(): void {
   if (adObserver) return
-  let scheduled = false
-  adObserver = new MutationObserver(() => {
-    if (scheduled) return
-    scheduled = true
-    requestAnimationFrame(() => {
-      scheduled = false
-      if (isSimplificationActive()) hideAds(getPrimaryElement())
+
+  adObserver = new MutationObserver((records) => {
+    records.forEach((record) => {
+      record.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) pendingRoots.push(node as Element)
+      })
     })
+    if (!pendingRoots.length) return
+
+    window.clearTimeout(rescanTimer)
+    rescanTimer = window.setTimeout(() => {
+      const roots = pendingRoots
+      pendingRoots = []
+      hideAds(getPrimaryElement(), roots)
+      // Feeds recycle nodes aggressively; without this the snapshot map would
+      // hold every card the feed ever rendered.
+      pruneDetachedOriginals()
+    }, AD_RESCAN_DEBOUNCE_MS)
   })
+
   adObserver.observe(document.body, { childList: true, subtree: true })
 }
 
 function stopAdObserver(): void {
   adObserver?.disconnect()
   adObserver = null
+  window.clearTimeout(rescanTimer)
+  pendingRoots = []
 }
 
 // Sticky and fixed need different replacements to stay layout-neutral, and only the
