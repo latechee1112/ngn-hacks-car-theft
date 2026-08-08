@@ -65,26 +65,81 @@ def test_malformed_json_raises_llm_classification_error(mock_openai_cls):
         classify_blocks(make_blocks(), make_profile(), None, make_settings())
 
 
-@patch("services.llm_classifier.OpenAI")
-def test_out_of_range_index_raises_llm_classification_error(mock_openai_cls):
-    """An index for a block that was never sent means the model was not answering
-    about this page - the whole response goes to the rule engine."""
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [7], "S": [], "D": []}')
-    mock_openai_cls.return_value = mock_client
-
-    with pytest.raises(LLMClassificationError):
-        classify_blocks(make_blocks(), make_profile(), None, make_settings())
+def make_ambiguous_blocks(n):
+    """n bare divs - all Uncertain, so all of them go to the model."""
+    return [PageBlock(blockId=f"b{i}", tag="div", text=f"block {i}") for i in range(n)]
 
 
 @patch("services.llm_classifier.OpenAI")
-def test_contradictory_index_raises_llm_classification_error(mock_openai_cls):
+def test_stray_out_of_range_index_is_dropped_not_fatal(mock_openai_cls):
+    """One bad index costs one block, not the page: rejecting the whole response
+    would throw away every correct decision alongside it."""
     mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [0], "S": [], "D": [0]}')
+    mock_client.chat.completions.create.return_value = _mock_completion(
+        '{"E": [0, 1, 2, 99], "S": [], "D": []}'
+    )
+    mock_openai_cls.return_value = mock_client
+
+    result = classify_blocks(make_ambiguous_blocks(8), make_profile(), None, make_settings())
+    assert [c.blockId for c in result] == ["b0", "b1", "b2"]
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_wholesale_one_based_response_is_shifted(mock_openai_cls):
+    """A model numbering from 1 is a systematic off-by-one, not noise - correcting
+    it saves the page. Detected only when every index fits 1..count with no 0."""
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [1, 3], "S": [], "D": [4]}')
+    mock_openai_cls.return_value = mock_client
+
+    result = classify_blocks(make_ambiguous_blocks(4), make_profile(), None, make_settings())
+    assert {c.blockId: c.label for c in result} == {
+        "b0": "Essential",
+        "b2": "Essential",
+        "b3": "Distracting",
+    }
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_zero_present_prevents_one_based_shift(mock_openai_cls):
+    """A response containing 0 is 0-based by definition; shifting it would
+    silently relabel the wrong blocks, so the stray index is dropped instead."""
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [0, 1, 2, 3], "S": [], "D": []}')
+    mock_openai_cls.return_value = mock_client
+
+    result = classify_blocks(make_ambiguous_blocks(3), make_profile(), None, make_settings())
+    assert [c.blockId for c in result] == ["b0", "b1", "b2"]
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_mostly_unmappable_response_is_rejected(mock_openai_cls):
+    """The tolerance is for slips. A response this far off was not answering the
+    question we asked, so the rule engine takes the page."""
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion(
+        '{"E": [0, 50, 60, 70], "S": [], "D": []}'
+    )
     mock_openai_cls.return_value = mock_client
 
     with pytest.raises(LLMClassificationError):
-        classify_blocks(make_blocks(), make_profile(), None, make_settings())
+        classify_blocks(make_ambiguous_blocks(3), make_profile(), None, make_settings())
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_contradictory_index_keeps_first_label(mock_openai_cls):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion(
+        '{"E": [0], "S": [], "D": [0, 1, 2]}'
+    )
+    mock_openai_cls.return_value = mock_client
+
+    result = classify_blocks(make_ambiguous_blocks(4), make_profile(), None, make_settings())
+    assert {c.blockId: c.label for c in result} == {
+        "b0": "Essential",
+        "b1": "Distracting",
+        "b2": "Distracting",
+    }
 
 
 @patch("services.llm_classifier.OpenAI")

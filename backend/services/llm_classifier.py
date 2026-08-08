@@ -36,6 +36,8 @@ Rules you MUST follow:
 - Respond with JSON only, in exactly this shape: {"E": [], "S": [], "D": []}
 - "E" = Essential, "S" = Supporting, "D" = Distracting. List the index "i" of each block \
 whose correct label differs from its provisionalLabel.
+- Indices are 0-based exactly as given in "i": the first block is 0 and the last is one less \
+than the number of blocks. Never emit an index equal to the number of blocks.
 - Omit any block whose provisional label is already right. Omitting is the default - if you \
 agree with everything, respond {"E": [], "S": [], "D": []}.
 - Use only indices that appear in the input. Never invent an index. Never list the same index \
@@ -220,6 +222,27 @@ def classify_blocks(
     return _expand(parsed, reviewed)
 
 
+# Share of returned indices that may be unusable before the response as a whole is
+# treated as untrustworthy. A stray index is a slip; a response that is mostly
+# unmappable means the model was not answering the question we asked, and the rule
+# engine should handle the page instead.
+_MAX_UNUSABLE_INDEX_RATIO = 0.25
+
+
+def _looks_one_based(indices: List[int], count: int) -> bool:
+    """Whether the model numbered from 1 despite being given 0-based indices.
+
+    Worth detecting rather than discarding: it is a systematic off-by-one, not
+    noise, and it is only safe to correct when the evidence covers the whole
+    response - every index inside 1..count, and never a 0. A response mixing 0
+    with an out-of-range index is something else and must not be shifted, since
+    shifting it would silently relabel the wrong blocks.
+    """
+    if not indices:
+        return False
+    return min(indices) >= 1 and max(indices) == count
+
+
 def _expand(parsed: RawClassificationResponse, reviewed: List[PageBlock]) -> List[RawClassification]:
     """Turns the index lists back into the {blockId, label} pairs validation expects.
 
@@ -227,30 +250,44 @@ def _expand(parsed: RawClassificationResponse, reviewed: List[PageBlock]) -> Lis
     downstream (validation, safety overrides, action building) still works on
     explicit per-block labels and is untouched by the format change.
 
-    An out-of-range index means the model was not answering about the list it was
-    given, and an index in two arrays means it contradicted itself - both make the
-    whole response untrustworthy, which is the caller's cue to use the rule engine.
-    Blocks simply not mentioned are the normal case: they keep their rule label
+    Blocks simply not mentioned are the normal case - they keep their rule label,
     because validation falls back per-block for anything absent here.
     """
+    count = len(reviewed)
+    groups = [(getattr(parsed, key), label) for key, label in _LABEL_BY_KEY.items()]
+    all_indices = [i for indices, _ in groups for i in indices]
+
+    offset = 0
+    if _looks_one_based(all_indices, count):
+        logger.info("LLM answered with 1-based indices; shifting to match the 0-based input")
+        offset = -1
+
     classifications: List[RawClassification] = []
     claimed: dict[int, str] = {}
+    unusable = 0
 
-    for key, label in _LABEL_BY_KEY.items():
-        for index in getattr(parsed, key):
-            if not 0 <= index < len(reviewed):
-                raise LLMClassificationError(
-                    f"LLM returned out-of-range block index {index} (sent {len(reviewed)} blocks)"
-                )
-            if index in claimed and claimed[index] != label:
-                raise LLMClassificationError(
-                    f"LLM put block index {index} in two different label groups"
-                )
+    for indices, label in groups:
+        for raw_index in indices:
+            index = raw_index + offset
+            # One bad index costs one block, not the page. Rejecting the whole
+            # response here would throw away every correct decision alongside it.
+            if not 0 <= index < count:
+                logger.warning("Ignoring out-of-range block index %s (sent %s blocks)", raw_index, count)
+                unusable += 1
+                continue
             if index in claimed:
+                if claimed[index] != label:
+                    logger.warning("Ignoring contradictory second label for block index %s", index)
+                    unusable += 1
                 continue
             claimed[index] = label
             classifications.append(
                 RawClassification(blockId=reviewed[index].block_id, label=label)
             )
+
+    if all_indices and unusable / len(all_indices) > _MAX_UNUSABLE_INDEX_RATIO:
+        raise LLMClassificationError(
+            f"LLM response was mostly unmappable: {unusable} of {len(all_indices)} indices unusable"
+        )
 
     return classifications

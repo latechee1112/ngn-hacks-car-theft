@@ -20,16 +20,16 @@ const LINK_GROUP_MIN_LINKS = 4
 // this necessary, and the tighter one is time, not count:
 //
 //   - The backend rejects anything over max_blocks_per_request (150) with 413.
-//   - Analysis latency is linear in block count, measured against this backend at
-//     roughly 0.5s/block: 20 blocks -> 15s, 60 -> 31s, 150 -> over 90s. The service
-//     worker gives up at ANALYZE_TIMEOUT_MS (60s), so a 150-block payload never
-//     returns an answer at all.
+//   - Analysis latency is linear in block count. Measured against this backend
+//     after the compact-response work: 60 blocks -> ~6.5s, 150 -> ~33s. (Before
+//     it, 60 took 31s and 150 never returned inside the service worker's
+//     ANALYZE_TIMEOUT_MS at all.)
 //
 // Either way a request that is too big means no LLM analysis: the extension falls
 // back to the local heuristic and the user is never told why. So the budget is
 // enforced here by dropping the least significant blocks. 60 keeps the round-trip
-// near half a minute with comfortable headroom under the timeout. Raise it only
-// alongside ANALYZE_TIMEOUT_MS, and only if the wait is acceptable.
+// under ten seconds. 150 now completes too, at ~33s — raise this only if that
+// wait is acceptable, and never above the backend's own limit.
 const MAX_BLOCKS = 60
 
 // Icons, spacers, tracking pixels: media small enough that it carries no reading
