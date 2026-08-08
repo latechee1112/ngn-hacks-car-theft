@@ -3,6 +3,7 @@ import ToggleSwitch from './ToggleSwitch'
 import Icon from './Icon'
 import type { ExtractionResult } from '../types/page'
 import type { SimplifyResponse } from '../types/analysis'
+import { CALIBRATION_STORAGE_KEY, type StoredCalibration } from '../types/calibration'
 
 async function getActiveTabId(): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -83,6 +84,35 @@ function App() {
   // the defaults over whatever was stored before load() resolves.
   const [settingsLoaded, setSettingsLoaded] = useState(false)
 
+  // Shown until the user either finishes or explicitly dismisses the
+  // calibration wizard (src/calibration/App.tsx) — starts hidden so it
+  // doesn't flash on before the storage check below resolves.
+  const [showCalibrationBanner, setShowCalibrationBanner] = useState(false)
+
+  async function checkCalibrationStatus() {
+    try {
+      const stored = await chrome.storage.local.get(CALIBRATION_STORAGE_KEY)
+      const record = stored?.[CALIBRATION_STORAGE_KEY] as StoredCalibration | undefined
+      setShowCalibrationBanner(!record?.profile && !record?.dismissed)
+    } catch {
+      setShowCalibrationBanner(false)
+    }
+  }
+
+  function openCalibration() {
+    chrome.tabs.create({ url: chrome.runtime.getURL('calibration.html') }).catch(() => {})
+  }
+
+  async function dismissCalibrationBanner() {
+    setShowCalibrationBanner(false)
+    try {
+      const record: StoredCalibration = { dismissed: true }
+      await chrome.storage.local.set({ [CALIBRATION_STORAGE_KEY]: record })
+    } catch {
+      // Best-effort — worst case the banner reappears next open.
+    }
+  }
+
   async function refreshStatus() {
     try {
       const tabId = await getActiveTabId()
@@ -134,6 +164,7 @@ function App() {
       setReduceMotion(stored.reduceMotion)
       setIncreaseSpacing(stored.increaseSpacing)
       await refreshStatus()
+      await checkCalibrationStatus()
       setSettingsLoaded(true)
     }
     init()
@@ -339,6 +370,33 @@ function App() {
       </header>
 
       <main className="flex flex-1 flex-col gap-6 overflow-y-auto bg-background p-4">
+        {showCalibrationBanner && (
+          <div className="flex items-start gap-3 rounded-md border border-outline bg-surface p-3">
+            <Icon name="user" className="mt-0.5 text-accent-text" />
+            <div className="flex-1">
+              <p className="text-body font-medium text-on-surface">Finish setup for a personalized experience</p>
+              <p className="mt-1 text-meta text-on-surface-variant">
+                A one-minute calibration tunes Distill to how you scan a page.
+              </p>
+              <button
+                type="button"
+                onClick={openCalibration}
+                className={`mt-2 text-meta font-medium text-accent-text transition-colors hover:text-accent-hover ${FOCUS_RING}`}
+              >
+                Finish setup
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={dismissCalibrationBanner}
+              aria-label="Dismiss"
+              className={`text-on-surface-variant transition-colors hover:text-on-surface ${FOCUS_RING}`}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <div className="inline-flex items-center gap-2 rounded-full border border-outline bg-surface px-3 py-1">
             <div className={`h-1.5 w-1.5 rounded-full ${simplified ? 'bg-accent-text' : 'bg-on-surface-muted'}`} />

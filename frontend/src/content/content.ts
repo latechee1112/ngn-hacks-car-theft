@@ -1,5 +1,5 @@
 import type { AnalyzeBackendResult, SimplifyResponse, VisualProfile } from '../types/analysis'
-import { DEFAULT_PROFILE } from './defaultProfile'
+import { DEFAULT_PROFILE, loadCalibratedProfile } from './defaultProfile'
 import { extractPage } from './extract'
 import { startScanAnimation } from './scanAnimation'
 import {
@@ -45,9 +45,14 @@ const FALLBACK_SETTINGS: SimplifySettings = {
   increaseSpacing: DEFAULT_PROFILE.spacingMultiplier > 1,
 }
 
-function profileFor(settings: SimplifySettings): VisualProfile {
+// Calibration result (if any) is the base; the sidepanel's live Simplification
+// Controls always win over it for these three fields, same as they already
+// win over DEFAULT_PROFILE — an explicit toggle is stronger intent than a
+// one-time calibration result.
+async function profileFor(settings: SimplifySettings): Promise<VisualProfile> {
+  const base = (await loadCalibratedProfile()) ?? DEFAULT_PROFILE
   return {
-    ...DEFAULT_PROFILE,
+    ...base,
     simplificationStrength: settings.simplificationStrength,
     reduceMotion: settings.reduceMotion,
     spacingMultiplier: settings.increaseSpacing ? INCREASED_SPACING_MULTIPLIER : 1,
@@ -94,7 +99,7 @@ async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResul
     `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s) and blurred ${prefiltered.deemphasized} secondary region(s) before analysis`,
   )
 
-  const result = await requestBackendAnalysis(profileFor(settings))
+  const result = await requestBackendAnalysis(await profileFor(settings))
 
   let outcome: SimplifyResult
   if (result.ok) {
