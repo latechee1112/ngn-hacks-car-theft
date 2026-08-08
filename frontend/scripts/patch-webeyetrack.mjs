@@ -13,11 +13,22 @@
 // obtained). Runs automatically via package.json's "postinstall" so it
 // survives a fresh `npm install`; idempotent, so re-running is harmless.
 import { readFileSync, writeFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const bundlePath = join(__dirname, '..', 'node_modules', 'webeyetrack', 'dist', 'index.js')
+// Resolve via real Node module resolution rather than a path relative to
+// this script - npm can hoist webeyetrack up to a parent node_modules
+// (e.g. the repo root) instead of frontend/node_modules, and a hardcoded
+// path would silently miss it, leaving the unpatched CDN-loading bundle in
+// whatever copy actually gets used.
+const require = createRequire(import.meta.url)
+
+let bundlePath
+try {
+  bundlePath = require.resolve('webeyetrack/dist/index.js')
+} catch {
+  // webeyetrack isn't installed (e.g. a partial/offline install) - nothing to patch.
+  process.exit(0)
+}
 
 const REPLACEMENTS = [
   ['"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"', '"/mediapipe/wasm"'],
@@ -27,26 +38,25 @@ const REPLACEMENTS = [
   ],
 ]
 
-let bundle
-try {
-  bundle = readFileSync(bundlePath, 'utf-8')
-} catch {
-  // webeyetrack isn't installed (e.g. a partial/offline install) - nothing to patch.
-  process.exit(0)
-}
+let bundle = readFileSync(bundlePath, 'utf-8')
 
 let changed = false
 for (const [from, to] of REPLACEMENTS) {
-  if (bundle.includes(to)) continue // already patched
-  if (!bundle.includes(from)) {
+  // The bundle references each URL from more than one call site, so a
+  // single non-global replace used to leave one occurrence unpatched while
+  // still looking "done" (the target string was present from the other
+  // site) - split/join replaces every occurrence instead.
+  if (bundle.includes(from)) {
+    bundle = bundle.split(from).join(to)
+    changed = true
+    continue
+  }
+  if (!bundle.includes(to)) {
     console.warn(
       `[patch-webeyetrack] Expected string not found (package version changed?): ${from}. ` +
         'Camera-based calibration may try to reach the network - re-check this patch against the installed version.',
     )
-    continue
   }
-  bundle = bundle.replace(from, to)
-  changed = true
 }
 
 if (changed) {
