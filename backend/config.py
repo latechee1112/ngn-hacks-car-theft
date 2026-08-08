@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # LLM (Featherless AI, OpenAI-compatible API)
     featherless_api_key: str = ""
     featherless_base_url: str = "https://api.featherless.ai/v1"
-    featherless_model: str = "deepseek-ai/DeepSeek-V4-Flash"
+    featherless_model: str = "Qwen/Qwen2.5-7B-Instruct"
     llm_timeout_seconds: float = 8.0
 
     # Request limits
