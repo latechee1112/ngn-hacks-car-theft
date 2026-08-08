@@ -19,9 +19,15 @@ const FOCUS_RING =
 function TrialTask({
   trial,
   onComplete,
+  onTargetHit,
 }: {
   trial: TrialConfig
   onComplete: (result: CalibrationTrial) => void
+  // Fired only on a correct target click, with that button's on-screen
+  // center - a free, known (position, was-looking-here) pair App.tsx feeds
+  // into live recalibration. Never fired for decoy/wrong-shape clicks,
+  // since only a correct hit reliably means the gaze was actually there.
+  onTargetHit?: (x: number, y: number) => void
 }) {
   // App.tsx mounts a fresh TrialTask per trial (key={trial.id}), so these only
   // ever need to be computed once per mount — no reset-on-prop-change effect.
@@ -52,10 +58,12 @@ function TrialTask({
     })
   }
 
-  function handleClick(shape: Shape) {
+  function handleClick(shape: Shape, event: React.MouseEvent<HTMLButtonElement>) {
     if (doneRef.current) return
     console.log('[Distill] shape click', { index: shape.index, isTarget: shape.isTarget })
     if (shape.isTarget) {
+      const rect = event.currentTarget.getBoundingClientRect()
+      onTargetHit?.(rect.left + rect.width / 2, rect.top + rect.height / 2)
       finish(true)
     } else {
       errorsRef.current += 1
@@ -79,7 +87,7 @@ function TrialTask({
           <button
             key={shape.index}
             type="button"
-            onClick={() => handleClick(shape)}
+            onClick={(e) => handleClick(shape, e)}
             aria-label={shape.isTarget ? 'Target shape' : 'Distractor shape'}
             className={`h-14 w-14 rounded-full transition-transform hover:scale-105 ${FOCUS_RING} ${
               shape.isTarget

@@ -118,18 +118,33 @@ function App() {
   const gazeDotRef = useRef<HTMLDivElement | null>(null)
   const latestGazePointRef = useRef<PageGazePoint | null>(null)
 
-  // What's actually drawn on screen chases the raw gaze target at a capped
-  // rate rather than snapping to it every tick - eyes dart (saccades move
-  // essentially instantly), and following that exactly is what read as
+  // Raw samples arrive only ~10x/sec (useGazeTracker.ts's
+  // MIN_FRAME_INTERVAL_MS) and carry real spatial noise per sample, so two
+  // consecutive samples can point in meaningfully different directions even
+  // when gaze hasn't actually moved. Smoothing this *before* the speed-capped
+  // chase below is what actually removes the jump-and-reverse look - the
+  // speed cap alone only bounds how fast the dot can move, not how often its
+  // target direction flips. Kept short - long enough to damp single-sample
+  // noise, short enough that it isn't itself a second source of lag on top
+  // of the speed cap below (100ms/px was: ~240ms here + the speed cap
+  // compounding into up to ~1s to settle after a real eye jump).
+  const smoothedTargetRef = useRef<{ x: number; y: number } | null>(null)
+  const TARGET_SMOOTHING_MS = 90
+
+  // What's actually drawn on screen chases the (now smoothed) gaze target at
+  // a capped rate rather than snapping to it every tick - eyes dart (saccades
+  // move essentially instantly), and following that exactly is what read as
   // "darting"/sudden movement. Deliberately lagging behind fast eye motion,
   // rather than teleporting with it, is what makes this read as calm.
   // Separate ref from latestGazePointRef (which still holds the raw, un-
-  // smoothed sample for e.g. trial scoring elsewhere).
+  // smoothed sample for e.g. trial scoring elsewhere). Raised from 1.1 -
+  // stacked with TARGET_SMOOTHING_MS above, the old value made real eye
+  // jumps take close to a second to settle; this closes distance roughly
+  // twice as fast once the (now faster-converging) smoothed target has
+  // actually moved, while still not being an instant teleport.
   const displayedPosRef = useRef<{ x: number; y: number } | null>(null)
   const prevTickAtRef = useRef(0)
-  // Retains the calm follow effect without the previous multi-second trail.
-  // A 1000px move now takes at most ~0.9s instead of ~2.2s.
-  const DISPLAY_MAX_SPEED_PX_MS = 1.1
+  const DISPLAY_MAX_SPEED_PX_MS = 2.2
 
   // Comet stretch: derived from the *displayed* (already speed-limited)
   // position's own motion, then smoothed further - see VELOCITY_SMOOTHING.
@@ -143,8 +158,11 @@ function App() {
   // smoothing floor still nudges scaleX/scaleY off 1 and makes the
   // (otherwise invisible-when-circular) rotation visible as a wobble.
   const SPEED_DEADZONE = 0.2
-  const STRETCH_K = 0.35
-  const SQUASH_K = 0.12
+  // Pulled back down a bit from 0.6/0.2 - shortens the comet elongation
+  // (the trail's actual length is this times the CSS gradient's own
+  // baked-in asymmetry in index.css's gaze-blob-morph).
+  const STRETCH_K = 0.48
+  const SQUASH_K = 0.16
 
   const handleGazeSample = useCallback((result: GazeResult, capturedAt: number) => {
     const point = toPagePoint(result, capturedAt)
@@ -185,20 +203,37 @@ function App() {
 
       const dt = prevTickAtRef.current ? now - prevTickAtRef.current : 0
 
-      // Speed-limited follow: step the displayed position toward rawTarget
-      // by at most DISPLAY_MAX_SPEED_PX_MS * dt this tick. First tick (or
-      // after a reduced-motion skip) just snaps once, since there's nothing
-      // to lag behind yet.
+      // Low-pass the raw target itself before chasing it - see
+      // smoothedTargetRef's comment above for why this (not just the speed
+      // cap below) is what fixes the glitchy jump-around look.
+      const smoothed = smoothedTargetRef.current
+      let smoothedTarget: { x: number; y: number }
+      if (!smoothed || reduceMotion || dt <= 0) {
+        smoothedTarget = rawTarget
+      } else {
+        const targetSmoothing = 1 - Math.exp(-dt / TARGET_SMOOTHING_MS)
+        smoothedTarget = {
+          x: smoothed.x + (rawTarget.x - smoothed.x) * targetSmoothing,
+          y: smoothed.y + (rawTarget.y - smoothed.y) * targetSmoothing,
+        }
+      }
+      smoothedTargetRef.current = smoothedTarget
+
+      // Speed-limited follow: step the displayed position toward the
+      // smoothed target by at most DISPLAY_MAX_SPEED_PX_MS * dt this tick.
+      // First tick (or after a reduced-motion skip) just snaps once, since
+      // there's nothing to lag behind yet.
       let showAt: { x: number; y: number }
       const cur = displayedPosRef.current
       if (!cur || reduceMotion || dt <= 0) {
-        showAt = rawTarget
+        showAt = smoothedTarget
       } else {
-        const dx = rawTarget.x - cur.x
-        const dy = rawTarget.y - cur.y
+        const dx = smoothedTarget.x - cur.x
+        const dy = smoothedTarget.y - cur.y
         const dist = Math.hypot(dx, dy)
         const maxStep = DISPLAY_MAX_SPEED_PX_MS * dt
-        showAt = dist <= maxStep ? rawTarget : { x: cur.x + (dx / dist) * maxStep, y: cur.y + (dy / dist) * maxStep }
+        showAt =
+          dist <= maxStep ? smoothedTarget : { x: cur.x + (dx / dist) * maxStep, y: cur.y + (dy / dist) * maxStep }
       }
       displayedPosRef.current = showAt
 
@@ -233,6 +268,7 @@ function App() {
     return () => {
       window.cancelAnimationFrame(frameId)
       displayedPosRef.current = null
+      smoothedTargetRef.current = null
       prevDisplayedPosRef.current = null
       prevTickAtRef.current = 0
       smoothedVelRef.current = { x: 0, y: 0 }
@@ -254,6 +290,37 @@ function App() {
     gazeEnabledRef.current = true
     trialStartRef.current = performance.now()
     setStep('trials')
+  }
+
+  // A correct trial click is a free, known (position, was-looking-here)
+  // pair - feeding it into the same registerCalibrationPoint used by the
+  // 9-dot phase lets the model keep correcting itself as head position
+  // drifts over the session, instead of only fitting once at the start.
+  // x/y here are screen pixels (TrialTask's getBoundingClientRect); convert
+  // to the tracker's viewport-normalized [-0.5, 0.5] convention - the
+  // inverse of hitTest.ts's toPagePoint.
+  //
+  // Two deliberate differences from the 9-dot calibration's own call:
+  //   1. maxSamples=2, not the full buffer. adapt() is a real, non-trivial
+  //      TFJS computation (BlazeGaze forward pass + gradient step) with no
+  //      worker (see the top of useGazeTracker.ts) - feeding it the full
+  //      ~8-frame buffer on every correct trial click was expensive enough
+  //      to visibly delay the next trial even with the setTimeout below,
+  //      since the browser can't dispatch your next click until that
+  //      synchronous work clears the main thread. Fewer frames also means
+  //      less leverage for one click in the pooled least-squares fit (the
+  //      library's own pruneCalibData caps total entries at maxPoints=9,
+  //      shared with the calibration dots - a full-weight trial click can
+  //      evict one of the original dots' data outright).
+  //   2. Deferred via setTimeout - lets this handler's caller (the trial's
+  //      click handler, which also advances trialIndex) return and let
+  //      React paint the next trial before this heavier work runs, rather
+  //      than blocking that same render.
+  function handleTargetHit(x: number, y: number) {
+    if (!gazeEnabledRef.current) return
+    const nx = x / window.innerWidth - 0.5
+    const ny = y / window.innerHeight - 0.5
+    setTimeout(() => tracker.registerCalibrationPoint(nx, ny, 2), 0)
   }
 
   function handleGazeCalibrationError(message: string) {
@@ -375,10 +442,10 @@ function App() {
           // animation frame, see the effect above). Inner div: the organic
           // morph animation (gaze-blob-morph, index.css) - kept on a
           // separate element so the two animations don't fight over the
-          // same style properties. Sized off hitTest.ts's own ~85-90px gaze
-          // error estimate scaled up per design ask ("much bigger, more
-          // modern") - still honestly reads as an uncertainty blob, not a
-          // precise cursor. Cyan, not accent's blue (#2f6fb5) - the target
+          // same style properties. Pulled back down from 350px (too big) to
+          // 256px - still bigger than hitTest.ts's own ~85-90px gaze error
+          // estimate, so it still honestly reads as an uncertainty blob, not
+          // a precise cursor. Cyan, not accent's blue (#2f6fb5) - the target
           // shape itself is bg-accent, so the gaze indicator needs a
           // visibly different hue to stay distinguishable from what's
           // actually being clicked.
@@ -389,7 +456,7 @@ function App() {
             // opacity is transitioned; transitioning transform as well would
             // restart a second interpolation on every frame and reintroduce
             // the stutter this loop is designed to remove.
-            className="pointer-events-none fixed top-0 left-0 z-50 h-[350px] w-[350px] opacity-0 transition-opacity duration-200 ease-out will-change-transform"
+            className="pointer-events-none fixed top-0 left-0 z-50 h-64 w-64 opacity-0 transition-opacity duration-200 ease-out will-change-transform"
           >
             <div className="gaze-blob-morph absolute inset-0" />
           </div>
@@ -397,7 +464,12 @@ function App() {
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
           Step {trialIndex + 1} of {TRIALS.length}
         </p>
-        <TrialTask key={TRIALS[trialIndex].id} trial={TRIALS[trialIndex]} onComplete={handleTrialComplete} />
+        <TrialTask
+          key={TRIALS[trialIndex].id}
+          trial={TRIALS[trialIndex]}
+          onComplete={handleTrialComplete}
+          onTargetHit={handleTargetHit}
+        />
       </Shell>
     )
   }

@@ -11,9 +11,13 @@ import { WebEyeTrack, WebcamClient, type GazeResult } from 'webeyetrack'
 //      for our case (a dedicated calibration tab, not a widget embedded in
 //      an arbitrary host page under memory/CPU pressure).
 // The proxy also attaches a global `window.addEventListener('click')` that
-// feeds every click on the page into calibration. Driving WebEyeTrack
-// directly means we decide exactly when handleClick() is called - only for
-// our own 9 calibration dots, never for trial/decoy clicks.
+// feeds every click on the page into calibration, indiscriminately. Driving
+// WebEyeTrack directly means we decide exactly when calibration data gets
+// registered: the 9 calibration dots, plus (App.tsx's handleTargetHit) a
+// correct trial click - never decoy clicks or wrong-shape clicks, which
+// don't reliably mean the gaze was actually there. The trial-click path
+// exists to correct for head-position drift over the session; the 9-dot
+// fit alone doesn't adapt after calibration finishes.
 const MAX_CALIBRATION_POINTS = 9
 
 // Shared with App.tsx, which owns the actual <video> element - it must stay
@@ -80,8 +84,14 @@ export interface GazeTracker {
   start: (videoElementId: string) => Promise<void>
   stop: () => void
   // x/y are viewport-normalized, range [-0.5, 0.5], same convention as
-  // GazeResult.normPog - see calibrationFit.ts.
-  registerCalibrationPoint: (x: number, y: number) => void
+  // GazeResult.normPog - see calibrationFit.ts. maxSamples caps how many of
+  // the most recent buffered frames get used (default: the whole buffer,
+  // same as before this param existed) - App.tsx's trial-click recalibration
+  // passes a small number here, since adapt() is a real, non-trivial TFJS
+  // computation with no worker (see the top of this file); a full 8-frame
+  // buffer on every correct trial click was blocking the main thread long
+  // enough to visibly delay the next trial's render.
+  registerCalibrationPoint: (x: number, y: number, maxSamples?: number) => void
   // Drops whatever's accumulated in the sample buffer without fitting on
   // it - see CALIBRATION_SETTLE_MS in calibrationFit.ts. Lets a caller
   // discard pre-settle frames after a new dot appears, so only frames
@@ -153,13 +163,20 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
     setReady(false)
   }, [])
 
-  const registerCalibrationPoint = useCallback((x: number, y: number) => {
+  const registerCalibrationPoint = useCallback((x: number, y: number, maxSamples?: number) => {
     // Buffer is cleared after every dot, so a dot with the eyes closed or
     // face lost for its whole dwell window (recentSamplesRef empty) simply
     // contributes nothing rather than fitting on stale frames left over
     // from the previous dot.
     if (!trackerRef.current || recentSamplesRef.current.length === 0) return
-    const samples = filterByHeadVector(recentSamplesRef.current)
+    // Always the *most recent* frames, not the oldest - those are the ones
+    // closest to the moment being registered (a click, or the end of a
+    // dot's dwell), same reasoning as the rolling buffer's own shift() above.
+    const pool =
+      maxSamples && maxSamples < recentSamplesRef.current.length
+        ? recentSamplesRef.current.slice(-maxSamples)
+        : recentSamplesRef.current
+    const samples = filterByHeadVector(pool)
     trackerRef.current.adapt(
       samples.map((s) => s.eyePatch),
       samples.map((s) => s.headVector),

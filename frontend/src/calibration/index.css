@@ -127,17 +127,39 @@ body {
   }
 }
 
+/* Gradient/mask centers sit off-center toward local +X (the "front"), not
+   dead-center - App.tsx's animation loop rotates this whole element to
+   align local +X with the actual velocity direction every frame
+   (rotate(angleDeg)), so shifting the falloff here bakes a trailing fade
+   into the shape that automatically points backward once rotated, at zero
+   per-frame cost (no JS-side blur recompute, no extra element). Pulled the
+   offset/spread back in from 60%/72% - the trail read as too long combined
+   with App.tsx's STRETCH_K elongation. filter: blur softens the shape's own
+   edge (mask-image alone still left a defined-looking boundary). */
 .gaze-blob-morph {
   border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
   background: radial-gradient(
-    circle,
+    ellipse 64% 54% at 56% 50%,
     rgb(94 211 255 / 55%) 0%,
-    rgb(94 211 255 / 34%) 38%,
-    rgb(94 211 255 / 14%) 58%,
-    transparent 82%
+    rgb(94 211 255 / 34%) 30%,
+    rgb(94 211 255 / 14%) 50%,
+    transparent 76%
   );
-  -webkit-mask-image: radial-gradient(circle, #000 0%, #000 42%, rgb(0 0 0 / 55%) 62%, transparent 84%);
-  mask-image: radial-gradient(circle, #000 0%, #000 42%, rgb(0 0 0 / 55%) 62%, transparent 84%);
+  -webkit-mask-image: radial-gradient(
+    ellipse 66% 56% at 56% 50%,
+    #000 0%,
+    #000 34%,
+    rgb(0 0 0 / 55%) 54%,
+    transparent 80%
+  );
+  mask-image: radial-gradient(
+    ellipse 66% 56% at 56% 50%,
+    #000 0%,
+    #000 34%,
+    rgb(0 0 0 / 55%) 54%,
+    transparent 80%
+  );
+  filter: blur(10px);
   animation: gaze-blob-morph 11s ease-in-out infinite;
   will-change: transform;
 }
