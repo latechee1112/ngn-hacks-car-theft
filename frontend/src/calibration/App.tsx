@@ -118,6 +118,10 @@ function App() {
   // a shaky live feed. latestGazePointRef just holds the most recent raw
   // sample for that timer to read; it's written on every sample (cheap, no
   // DOM touch) but only consumed once per tick.
+  // The dot's CSS transition duration (below, in the 'trials' JSX) is set
+  // to match this exactly, with a linear easing - so one snapshot's glide
+  // finishes right as the next one starts, with no dead pause and no
+  // ease-out deceleration-to-a-stop at the boundary. Change one, change both.
   const gazeDotRef = useRef<HTMLDivElement | null>(null)
   const latestGazePointRef = useRef<PageGazePoint | null>(null)
   const GAZE_DOT_SNAPSHOT_MS = 500
@@ -285,7 +289,7 @@ function App() {
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[450ms] ease-in-out"
+            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[500ms] ease-linear"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
