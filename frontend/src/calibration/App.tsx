@@ -136,15 +136,20 @@ function App() {
       const point = latestGazePointRef.current
       const dot = gazeDotRef.current
       if (!point || !dot) return
+      // Snap onto the target's center once gaze is within the same
+      // tolerance hit-testing uses to count it as "on the target"
+      // (hitTest.ts's HIT_TOLERANCE_PX) - so the snap only fires when a
+      // hit would actually be scored, not as a separate, more lenient
+      // magnet radius.
       const targetRect = currentTargetRect()
-      const showAt = isOnTarget(point, targetRect)
-        ? { x: targetRect!.left + targetRect!.width / 2, y: targetRect!.top + targetRect!.height / 2 }
-        : point
+      const showAt =
+        targetRect && isOnTarget(point, targetRect)
+          ? { x: targetRect.left + targetRect.width / 2, y: targetRect.top + targetRect.height / 2 }
+          : point
       dot.style.transform = `translate3d(${showAt.x}px, ${showAt.y}px, 0) translate(-50%, -50%)`
       dot.style.opacity = '1'
     }, GAZE_DOT_SNAPSHOT_MS)
     return () => window.clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, trialIndex])
 
   const tracker = useGazeTracker(handleGazeSample)
@@ -280,7 +285,7 @@ function App() {
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-150 ease-out"
+            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[450ms] ease-in-out"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">

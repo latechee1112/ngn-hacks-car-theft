@@ -1,8 +1,8 @@
 // 9-point calibration sequence. No manual model-fitting needed here -
-// WebEyeTrack.handleClick(normX, normY) already does the whole affine fit +
-// gradient fine-tune internally (see useGazeTracker.ts), using whatever
-// GazeResult it most recently computed as the paired sample. This module is
-// just the dot layout.
+// useGazeTracker.ts's registerCalibrationPoint does the whole affine fit +
+// gradient fine-tune internally via WebEyeTrack.adapt(), fed a rolling
+// buffer of recent open-eye frames rather than a single clicked-moment
+// sample. This module is just the dot layout.
 
 export interface CalibrationDot {
   id: string
@@ -30,14 +30,10 @@ export function dotToNormalizedPoint(dot: CalibrationDot): [number, number] {
   return [dot.xFraction - 0.5, dot.yFraction - 0.5]
 }
 
-// handleClick() debounces calls within 1000ms of each other (and ignores a
-// click within ~0.05 normalized units of the last one, which 9 spread-out
-// dots never trigger) - so consecutive clicks must be spaced out at least
-// this long or a dot's calibration sample is silently dropped, not queued.
-// This single interval does double duty as both "time to let the user
-// fixate on the new dot" and "spacing since the previous click" - the two
-// used to be separate serial delays (900ms dwell + 1000ms debounce = 1900ms/
-// dot), but the dwell before a dot's click IS the gap since the previous
-// dot's click, so there's no need to wait twice. 50ms of margin over the
-// library's exact 1000ms floor absorbs setTimeout/render jitter.
+// Time to dwell on each dot before registering it. Serves two purposes:
+// lets the user actually fixate before we start counting frames toward that
+// dot's fit, and gives registerCalibrationPoint's rolling sample buffer
+// (CALIBRATION_SAMPLE_BUFFER_SIZE in useGazeTracker.ts, ~625ms of frames at
+// ~24Hz) time to fill with fresh, on-target frames rather than leftover
+// frames from the previous dot or the transition between them.
 export const CALIBRATION_DOT_INTERVAL_MS = 1050

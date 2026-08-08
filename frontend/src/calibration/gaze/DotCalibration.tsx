@@ -32,10 +32,8 @@ function DotCalibration({
       return
     }
     const dot = CALIBRATION_DOTS[dotIndex]
-    // Dwell on the new dot so the user has fixated before we register the
-    // point - this same wait also satisfies the library's 1000ms
-    // click-to-click debounce floor, so advancing immediately after the
-    // click (rather than waiting again) is safe (see calibrationFit.ts).
+    // Dwell on the new dot so the user has fixated and the sample buffer
+    // has filled before we register the point (see calibrationFit.ts).
     const dwell = window.setTimeout(() => {
       const [x, y] = dotToNormalizedPoint(dot)
       tracker.registerCalibrationPoint(x, y)

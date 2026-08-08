@@ -34,6 +34,24 @@ export const GAZE_VIDEO_ID = 'distill-gaze-video'
 // tracking responsiveness.
 const MIN_FRAME_INTERVAL_MS = 1000 / 24
 
+// How many recent open-eye frames registerCalibrationPoint feeds to a
+// single dot's fit. handleClick() (the library's own entry point) only ever
+// uses the single most-recent frame - one blink, stray head-turn, or noisy
+// prediction at exactly the wrong millisecond then permanently skews that
+// dot's contribution to the calibration fit, with no way to detect or
+// recover from it. adapt() (also public, WebEyeTrack.d.ts) accepts a batch
+// of samples for one label, which both the closed-form affine fit and the
+// gradient step use directly - more, consistent samples per dot materially
+// improves calibration accuracy over a single frame. At MIN_FRAME_INTERVAL_MS
+// (~24Hz) this is roughly the last 600ms of fixation on the dot.
+const CALIBRATION_SAMPLE_BUFFER_SIZE = 15
+
+interface BufferedGazeSample {
+  eyePatch: ImageData
+  headVector: number[]
+  faceOrigin3D: number[]
+}
+
 export interface GazeTracker {
   ready: boolean
   start: (videoElementId: string) => Promise<void>
@@ -48,6 +66,9 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
   const webcamRef = useRef<WebcamClient | null>(null)
   const activeRef = useRef(false)
   const [ready, setReady] = useState(false)
+  // Rolling window of recent open-eye frames, for registerCalibrationPoint
+  // to draw a batch from - see CALIBRATION_SAMPLE_BUFFER_SIZE above.
+  const recentSamplesRef = useRef<BufferedGazeSample[]>([])
 
   const start = useCallback(
     async (videoElementId: string) => {
@@ -65,6 +86,16 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
         if (now - lastProcessedAt < MIN_FRAME_INTERVAL_MS) return
         lastProcessedAt = now
         const result = await trackerRef.current.step(frame, timestamp)
+        if (result.gazeState === 'open') {
+          recentSamplesRef.current.push({
+            eyePatch: result.eyePatch,
+            headVector: result.headVector,
+            faceOrigin3D: result.faceOrigin3D,
+          })
+          if (recentSamplesRef.current.length > CALIBRATION_SAMPLE_BUFFER_SIZE) {
+            recentSamplesRef.current.shift()
+          }
+        }
         // performance.now() at callback time, not GazeResult.timestamp
         // (which is relative to video start, a different clock than the
         // trial start/end markers this later gets compared against).
@@ -80,11 +111,24 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
     webcamRef.current?.stopWebcam()
     webcamRef.current = null
     trackerRef.current = null
+    recentSamplesRef.current = []
     setReady(false)
   }, [])
 
   const registerCalibrationPoint = useCallback((x: number, y: number) => {
-    trackerRef.current?.handleClick(x, y)
+    const samples = recentSamplesRef.current
+    // Buffer is cleared after every dot, so a dot with the eyes closed or
+    // face lost for its whole dwell window (samples.length === 0) simply
+    // contributes nothing rather than fitting on stale frames left over
+    // from the previous dot.
+    if (!trackerRef.current || samples.length === 0) return
+    trackerRef.current.adapt(
+      samples.map((s) => s.eyePatch),
+      samples.map((s) => s.headVector),
+      samples.map((s) => s.faceOrigin3D),
+      samples.map(() => [x, y]),
+    )
+    recentSamplesRef.current = []
   }, [])
 
   return { ready, start, stop, registerCalibrationPoint }
