@@ -21,6 +21,7 @@ import {
   isSpacingIncreased,
   prefilterPage,
   restoreOriginalPage,
+  revealSimplification,
   setBlurIntensity,
   setIncreaseSpacing,
   setReduceColorVariation,
@@ -205,7 +206,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // the analysis runs and has no time limit of its own to fall back on.
       // Activate only — restoring the page does not replay it.
       const settings: SimplifySettings = { ...FALLBACK_SETTINGS, ...(message.settings ?? {}) }
-      const stopScan = startScanAnimation()
+      const stopScan = startScanAnimation(revealSimplification)
       // Closing the side panel while the scan runs closes the channel this reply goes
       // down, and sendResponse then throws. That must not be mistaken for the analysis
       // failing: unguarded, the throw lands in the .catch below, which rolls the whole

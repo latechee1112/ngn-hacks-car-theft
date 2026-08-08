@@ -34,18 +34,17 @@ const SCAN_HOST_ID = 'distill-scan-layer'
 // registered. The effect was the whole sweep silently painting with
 // visibility:hidden: correct geometry, correct opacity, invisible regardless -
 // confirmed live against reddit.com, where getComputedStyle(host).visibility
-// flipped from 'hidden' to 'visible' the instant the tag was registered.
-// Defining it (even as a no-op class) makes it ":defined", so that class of rule
-// no longer matches it - on any site, not just Reddit.
-let scanHostDefined = false
-function ensureScanHostDefined(): void {
-  if (scanHostDefined || customElements.get(SCAN_HOST_TAG)) {
-    scanHostDefined = true
-    return
-  }
-  customElements.define(SCAN_HOST_TAG, class extends HTMLElement {})
-  scanHostDefined = true
-}
+// flipped from 'hidden' to 'visible' the instant the tag was registered via
+// customElements.define().
+//
+// customElements.define() looked like the fix, but window.customElements is
+// null in this content script's actual execution context on reddit.com (confirmed
+// from the crash's own stack trace - Chrome does not reliably expose a working
+// CustomElementRegistry to every isolated world a content script runs in). So
+// instead of registering the tag, :host below just overrides the inherited
+// visibility directly with !important, which wins the cascade regardless of
+// what rule the page applies or what order it was declared in - no dependency
+// on an API that turned out to not reliably exist here.
 
 // Three phases: INTRO plays once (grid wipes in, first beam pass). LOOP
 // repeats indefinitely after that — for as long as the backend call is in
@@ -108,8 +107,17 @@ function prefersReducedMotion(): boolean {
 // JS only ever adds/removes 'looping' and 'outro', never regenerates this.
 const STYLE = `
 :host {
-  /* No box, no position — see the note at the top of this file. */
+  /* No box, no position — see the note at the top of this file. Belt only:
+     the load-bearing copy of these declarations lives on host.style (set in
+     JS below) as inline !important, since a shadow root's :host rule is just
+     an ordinary-specificity author rule from the outer page's point of view
+     and can lose to whatever layout rule the host site applies to its own
+     children (e.g. a 'body > *' flex/grid-item rule) — which is exactly what
+     let a page's flex layout swallow this element as a real column instead
+     of a boxless decoration. Inline style can only be beaten by another
+     inline !important, so it is the one guarantee here, not this block. */
   display: contents;
+  visibility: visible !important;
 }
 .root {
   position: fixed;
@@ -246,8 +254,17 @@ let activeSweep: (() => void) | null = null
  * Both starting and stopping return immediately. Callers must not await
  * `startScanAnimation()` or let it sequence work — it is decoration running
  * alongside the real analysis call, never in front of it.
+ *
+ * `onReveal`, if given, fires exactly once — at the moment `finish()` starts the
+ * outro fade, i.e. the earliest point the real page transformation is allowed to
+ * become visible (see REVEAL_ATTR in simplify.ts). The two lines up on purpose: the
+ * sweep fading away doubles as the transition into the now-simplified page, instead
+ * of the transformation happening earlier and just sitting there, visible through the
+ * sweep's translucent wash, while the sweep keeps looping on top of it. Never fires on
+ * a teardown (superseded-by-restart) exit — that page is about to be reprocessed by
+ * the sweep replacing this one, not shown as-is.
  */
-export function startScanAnimation(): () => void {
+export function startScanAnimation(onReveal?: () => void): () => void {
   if (!document.body) return () => {}
 
   // Restart rather than stack, so a double-press can't leave two layers running.
@@ -256,7 +273,6 @@ export function startScanAnimation(): () => void {
   // layer this call is about to create.
   activeSweep?.()
   removeOrphanScanLayers()
-  ensureScanHostDefined()
 
   const reduced = prefersReducedMotion()
   const introMs = reduced ? REDUCED_INTRO_MS : INTRO_MS
@@ -266,6 +282,19 @@ export function startScanAnimation(): () => void {
   const host = document.createElement(SCAN_HOST_TAG)
   host.id = SCAN_HOST_ID
   host.setAttribute('aria-hidden', 'true')
+  // Load-bearing, not decoration: inline !important beats any stylesheet
+  // rule the host page has, including ones that were never written with this
+  // element in mind (a `body > *` flex/grid-item rule, a generic
+  // `:not(:defined)` hiding rule, etc). Without this, `display: contents`
+  // living only in the shadow root's `:host` block is an ordinary-specificity
+  // author rule from the page's perspective and can lose that cascade — the
+  // host then keeps a real box, gets laid out as a flex/grid item alongside
+  // the actual content, and squeezes it into a narrow column. `position:
+  // static` is set for the same reason: nothing here should ever be able to
+  // give this host a position of its own.
+  host.style.setProperty('display', 'contents', 'important')
+  host.style.setProperty('position', 'static', 'important')
+  host.style.setProperty('visibility', 'visible', 'important')
 
   const shadow = host.attachShadow({ mode: 'closed' })
 
@@ -304,6 +333,7 @@ export function startScanAnimation(): () => void {
   function finish(): void {
     if (removed) return
     release()
+    onReveal?.()
     root.classList.remove('looping')
     root.classList.add('outro')
     window.setTimeout(() => removeScanLayer(host), outroMs + 100)

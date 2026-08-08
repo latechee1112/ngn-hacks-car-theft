@@ -19,6 +19,15 @@ import { applySiteRules, findSiteRule, HARD_BLUR_CLASS } from './siteRules'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
 const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
+// Set once the scan sweep (scanAnimation.ts) has actually finished, not the moment
+// the classes below get added to the DOM. applyBackendActions()/applySimplification()
+// run the instant the backend responds, which is usually well before the sweep's own
+// minimum-visible-time + outro are done — the sweep is only a translucent wash, so
+// without this gate the reading column narrowing and every dim/hide effect are plainly
+// visible shifting underneath it, mid-animation, instead of appearing to resolve once
+// the sweep clears. revealSimplification() is the only thing that sets this, called
+// from content.ts as the sweep's onReveal callback.
+const REVEAL_ATTR = 'data-distill-reveal'
 const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
@@ -422,14 +431,15 @@ function injectGlobalStyle(): void {
   const style = document.createElement('style')
   style.id = STYLE_TAG_ID
   style.textContent = `
-html[${SIMPLIFIED_ATTR}] body {
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] body {
   line-height: 1.7 !important;
 }
 /* The narrow reading column is applied via its own class, NOT to every primary
    region: on a card grid (a YouTube feed, a search results page) forcing 760px
    and a larger font squeezes the grid into a narrow strip in the middle of an
-   otherwise empty page. isProseLike() decides who gets this. */
-html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} {
+   otherwise empty page. isProseLike() decides who gets this. Gated on REVEAL_ATTR,
+   not just SIMPLIFIED_ATTR - see the note above that constant's declaration. */
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} {
   max-width: 760px !important;
   margin-left: auto !important;
   margin-right: auto !important;
@@ -437,37 +447,40 @@ html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} {
   line-height: 1.75 !important;
   float: none !important;
 }
-html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} p,
-html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} li {
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} p,
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} li {
   /* em, relative to the container's already-scaled font-size above - not an
      independent multiply, or textScale would compound quadratically. */
   margin-bottom: calc(1.1em * var(--distill-spacing, 1)) !important;
   font-size: 1.05em !important;
 }
-html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h1,
-html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h2,
-html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h3 {
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} h1,
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} h2,
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} h3 {
   margin-top: 1.4em !important;
   margin-bottom: 0.6em !important;
 }
-/* Like the ad rule, deliberately not gated on [${SIMPLIFIED_ATTR}]: the local
-   pre-filter blurs obvious secondary content before the backend answers, which is
-   before that attribute is set. The classes are only ever added by us and are
-   cleared on restore, so the gate bought nothing. */
-.${DEEMPHASIZE_CLASS} {
+/* Ads are the one thing NOT gated on [${REVEAL_ATTR}] - see the ad rule below.
+   Everything else that visibly reshapes the page waits for it: deemphasizeSecondary()
+   now runs inside applyBackendActions(), after the backend answers, but the backend
+   usually answers well after the scan sweep's intro has already finished (the sweep
+   is a translucent wash, not an opaque cover) - so without this gate the dim/blur
+   effect is plainly visible landing mid-sweep instead of appearing once the sweep
+   resolves. See the note on REVEAL_ATTR's declaration. */
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} {
   opacity: 0.4 !important;
   filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
   transition: opacity 0.2s ease, filter 0.2s ease !important;
 }
-.${DEEMPHASIZE_CLASS}:hover {
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS}:hover {
   opacity: 0.85 !important;
   filter: grayscale(60%) !important;
 }
-.${DEEMPHASIZE_CLASS} input,
-.${DEEMPHASIZE_CLASS} button,
-.${DEEMPHASIZE_CLASS} select,
-.${DEEMPHASIZE_CLASS} textarea,
-.${DEEMPHASIZE_CLASS} a[href] {
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} input,
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} button,
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} select,
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} textarea,
+html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
   opacity: 1 !important;
   filter: none !important;
 }
@@ -475,25 +488,27 @@ html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h3 {
    NOT exempt nested links/buttons — every one of these targets (Like button, team
    member links, tab links) is interactive, and blurring social proof only works if it
    covers those too. Hover still reveals, so nothing becomes unreachable, and
-   pointer-events stay on so the revealed control is clickable. */
-.${HARD_BLUR_CLASS},
-.${HARD_BLUR_CLASS} a[href],
-.${HARD_BLUR_CLASS} button,
-.${HARD_BLUR_CLASS} img {
+   pointer-events stay on so the revealed control is clickable. Gated on [${REVEAL_ATTR}]
+   for the same reason as .${DEEMPHASIZE_CLASS} above - applySiteRules() also runs
+   inside applyBackendActions(). */
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS},
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} a[href],
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} button,
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} img {
   filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
   transition: filter 0.2s ease, opacity 0.2s ease !important;
 }
-.${HARD_BLUR_CLASS} {
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS} {
   opacity: 0.5 !important;
 }
-.${HARD_BLUR_CLASS}:hover,
-.${HARD_BLUR_CLASS}:focus-within,
-.${HARD_BLUR_CLASS}:hover a[href],
-.${HARD_BLUR_CLASS}:focus-within a[href],
-.${HARD_BLUR_CLASS}:hover button,
-.${HARD_BLUR_CLASS}:focus-within button,
-.${HARD_BLUR_CLASS}:hover img,
-.${HARD_BLUR_CLASS}:focus-within img {
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:hover,
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:focus-within,
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:hover a[href],
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:focus-within a[href],
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:hover button,
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:focus-within button,
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:hover img,
+html[${REVEAL_ATTR}] .${HARD_BLUR_CLASS}:focus-within img {
   filter: none !important;
   opacity: 1 !important;
 }
@@ -502,21 +517,22 @@ html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h3 {
    against that header, the hero visibly grows by exactly the header's height.
    absolute/relative stop the element from following the scroll while it keeps the
    exact box it already had: fixed elements stay out of flow, sticky ones keep the
-   space flow already reserved for them. */
-.${UNSTICK_FIXED_CLASS} {
+   space flow already reserved for them. Gated on [${REVEAL_ATTR}]: unstick() is called
+   from the same post-backend passes as the rules above. */
+html[${REVEAL_ATTR}] .${UNSTICK_FIXED_CLASS} {
   position: absolute !important;
   max-width: 100% !important;
 }
-.${UNSTICK_STICKY_CLASS} {
+html[${REVEAL_ATTR}] .${UNSTICK_STICKY_CLASS} {
   position: relative !important;
   top: auto !important;
   bottom: auto !important;
 }
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
   color: ${NEUTRAL_COLOR} !important;
 }
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):not(button a) {
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):not(button a) {
   text-decoration: underline !important;
 }
 #${RESTORE_BTN_ID} {
@@ -541,7 +557,7 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):
   outline: 3px solid #fff;
   outline-offset: 2px;
 }
-html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${SECTION_HIDDEN_CLASS} {
   display: none !important;
 }
 /* Deliberately NOT gated on [${SIMPLIFIED_ATTR}]: the ad pre-filter runs before the
@@ -620,6 +636,13 @@ export function hiddenAdCount(): number {
 
 export function isSimplificationActive(): boolean {
   return document.documentElement.getAttribute(SIMPLIFIED_ATTR) === 'true'
+}
+
+// Called from content.ts once the scan sweep has actually finished (its onReveal
+// callback) — see REVEAL_ATTR's declaration for why this is a separate step from
+// applying the classes themselves.
+export function revealSimplification(): void {
+  document.documentElement.setAttribute(REVEAL_ATTR, 'true')
 }
 
 export function applySimplification(): SimplifyResult {
@@ -906,7 +929,7 @@ function buildSections(root: Element): Element[][] {
 
   if (wrapperCount >= 2) {
     const groups: Element[][] = []
-    let intro: Element[] = []
+    const intro: Element[] = []
     let seenWrapper = false
     children.forEach((child) => {
       if (isSectionWrapper(child)) {
@@ -1066,6 +1089,7 @@ export function restoreOriginalPage(): void {
   disableProgressiveReveal()
   restoreAllOriginal()
   document.documentElement.removeAttribute(SIMPLIFIED_ATTR)
+  document.documentElement.removeAttribute(REVEAL_ATTR)
   document.documentElement.removeAttribute(REDUCE_MOTION_ATTR)
   document.documentElement.style.removeProperty('--distill-text-scale')
   document.documentElement.style.removeProperty('--distill-spacing')
