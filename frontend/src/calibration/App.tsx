@@ -287,7 +287,13 @@ function App() {
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[450ms] ease-in-out"
+            // A soft blob, not a precise dot - sized off hitTest.ts's own
+            // ~85-90px gaze error estimate (h-44/w-44 = 176px diameter) so
+            // the visual honestly matches the tracker's real uncertainty
+            // instead of implying pixel precision it doesn't have. Longer,
+            // easing transition reads as a flowing presence rather than a
+            // point snapping between positions.
+            className="pointer-events-none fixed top-0 left-0 z-50 h-44 w-44 rounded-full bg-[radial-gradient(circle,_rgb(231_154_148_/_55%)_0%,_rgb(231_154_148_/_22%)_45%,_transparent_75%)] opacity-0 blur-sm transition-[opacity,transform] duration-[650ms] ease-out"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
