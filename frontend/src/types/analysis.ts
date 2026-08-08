@@ -42,3 +42,11 @@ export interface VisualProfile {
 export type AnalyzeBackendResult =
   | { ok: true; data: AnalyzePageResponse }
   | { ok: false; error: string }
+
+// Reply to DISTILL_SIMPLIFY. `ok: false` is a real outcome, not an absent reply:
+// the pre-filter mutates the page before anything can throw, so a failure that
+// answered with silence would leave the panel waiting forever on a page it had
+// already changed.
+export type SimplifyResponse =
+  | { ok: true; primaryFound: boolean; deemphasizedCount: number; adsHidden: number }
+  | { ok: false; error: string }

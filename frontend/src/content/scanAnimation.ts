@@ -189,9 +189,25 @@ const STYLE = `
 }
 `
 
-function removeScanLayer(): void {
-  document.getElementById(SCAN_HOST_ID)?.remove()
+// Takes down one specific host node. Deliberately by reference rather than by id:
+// a restarted sweep puts a *new* node under the same id, and the outgoing
+// instance's outro timer must never be able to remove its replacement.
+function removeScanLayer(host: Element): void {
+  host.remove()
 }
+
+// Only for hosts no closure owns any more — a layer left behind by a previous
+// content-script instance on this page. The live instance is torn down through
+// `activeSweep` instead, which also stops its timers.
+function removeOrphanScanLayers(): void {
+  document.querySelectorAll(`#${SCAN_HOST_ID}`).forEach((el) => el.remove())
+}
+
+// Immediate teardown for the sweep currently on screen, if any. A layer is not
+// just a DOM node: each one owns an intro timer, a liveness interval, and
+// possibly a pending outro. Removing the node alone would leave all three live in
+// a closure nothing can reach.
+let activeSweep: (() => void) | null = null
 
 /**
  * Starts the scan sweep and returns a `stop` function. The sweep plays its
@@ -213,7 +229,11 @@ export function startScanAnimation(): () => void {
   if (!document.body) return () => {}
 
   // Restart rather than stack, so a double-press can't leave two layers running.
-  removeScanLayer()
+  // The outgoing instance is stopped through its own teardown, not by removing its
+  // node: its timers have to die with it, or its outro fires later and removes the
+  // layer this call is about to create.
+  activeSweep?.()
+  removeOrphanScanLayers()
 
   const reduced = prefersReducedMotion()
   const introMs = reduced ? REDUCED_INTRO_MS : INTRO_MS
@@ -248,15 +268,35 @@ export function startScanAnimation(): () => void {
   const startedAt = performance.now()
   let removed = false
 
-  function finish(): void {
-    if (removed) return
+  // Clears everything this instance owns except the node itself, so the two exit
+  // paths below differ only in how the node goes away.
+  function release(): void {
     removed = true
+    if (activeSweep === teardown) activeSweep = null
     window.clearTimeout(introTimer)
     window.clearInterval(livenessTimer)
+  }
+
+  // Normal exit: the work finished, so play the outro before removing the layer.
+  function finish(): void {
+    if (removed) return
+    release()
     root.classList.remove('looping')
     root.classList.add('outro')
-    window.setTimeout(removeScanLayer, outroMs + 100)
+    window.setTimeout(() => removeScanLayer(host), outroMs + 100)
   }
+
+  // Replacement exit: a new sweep is starting, so this node goes now — an outro
+  // would only fade out a layer the user is no longer looking at, and its timer
+  // would outlive the instance that scheduled it. Any pending finish() from a
+  // stop() call in flight is neutralized by `removed`.
+  function teardown(): void {
+    if (removed) return
+    release()
+    removeScanLayer(host)
+  }
+
+  activeSweep = teardown
 
   // Enter the loop once the intro's own animation has actually finished
   // playing — not tied to stop(), so the loop starts even if the caller

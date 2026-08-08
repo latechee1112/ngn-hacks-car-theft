@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import ToggleSwitch from './ToggleSwitch'
 import Icon from './Icon'
 import type { ExtractionResult } from '../types/page'
+import type { SimplifyResponse } from '../types/analysis'
 
 async function getActiveTabId(): Promise<number | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -154,7 +155,7 @@ function App() {
         setError('No active tab found')
         return
       }
-      const response = (await sendToTab(tabId, {
+      const response = await sendToTab<SimplifyResponse>(tabId, {
         type: 'DISTILL_SIMPLIFY',
         settings: {
           // Slider is 1-100; the backend's VisualProfile wants 0.0-1.0.
@@ -162,7 +163,14 @@ function App() {
           reduceMotion,
           increaseSpacing,
         },
-      })) as { primaryFound: boolean; deemphasizedCount: number; adsHidden: number }
+      })
+      // The content script rolls the page back before reporting a failure, so the
+      // panel stays on "not simplified" rather than offering a restore for a page
+      // that was never transformed.
+      if (!response.ok) {
+        setError(`Couldn't simplify this page: ${response.error}`)
+        return
+      }
       setSimplified(true)
       setAdsHidden(response.adsHidden ?? 0)
       setColorReductionAvailable(response.primaryFound)

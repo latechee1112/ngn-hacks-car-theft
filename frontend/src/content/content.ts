@@ -1,4 +1,4 @@
-import type { AnalyzeBackendResult, VisualProfile } from '../types/analysis'
+import type { AnalyzeBackendResult, SimplifyResponse, VisualProfile } from '../types/analysis'
 import { DEFAULT_PROFILE } from './defaultProfile'
 import { extractPage } from './extract'
 import { startScanAnimation } from './scanAnimation'
@@ -138,9 +138,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const settings: SimplifySettings = { ...FALLBACK_SETTINGS, ...(message.settings ?? {}) }
       const stopScan = startScanAnimation()
       handleSimplify(settings)
-        .then(sendResponse)
+        .then((result) => sendResponse({ ok: true, ...result } satisfies SimplifyResponse))
         .catch((err) => {
           console.error('[Distill] simplify failed:', err)
+          // prefilterPage() has already hidden ads and blurred secondary content by
+          // the time anything downstream can throw, and the restore button is only
+          // added on the success paths. Rolling back is the one state we can still
+          // guarantee is coherent, and it's the state the panel will show.
+          restoreOriginalPage()
+          sendResponse({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          } satisfies SimplifyResponse)
         })
         .finally(stopScan)
       return true
