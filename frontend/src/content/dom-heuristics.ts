@@ -3,6 +3,16 @@
 // extract) — and so the "is this filtered?" check is one shared definition.
 export const AD_HIDDEN_CLASS = 'distill-ad-hidden'
 
+// Blur/dim applied to secondary content. Lives here for the same reason as the class
+// above: modules other than simplify.ts (siteRules.ts) need to reference it without
+// importing simplify, which imports them.
+export const DEEMPHASIZE_CLASS = 'distill-deemphasize'
+// display:none, applied by a backend 'collapse' action and by progressive reveal.
+export const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
+// Layout-neutral replacements for position:fixed / position:sticky.
+export const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
+export const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
+
 export function isPrefilteredAd(el: Element): boolean {
   return !!el.closest(`.${AD_HIDDEN_CLASS}`)
 }

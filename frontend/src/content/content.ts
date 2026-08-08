@@ -59,25 +59,89 @@ async function profileFor(settings: SimplifySettings): Promise<VisualProfile> {
   }
 }
 
+// The scan sweep plays until handleSimplify() settles, so nothing in this pipeline may
+// hang forever — a pending promise here is a sweep looping over a page nothing is
+// analyzing. The request goes over a long-lived port (see background.ts) precisely
+// because that gives three independent ways to notice a dead request, in the order they
+// normally fire:
+//
+//   1. onDisconnect — the service worker died, or the extension was reloaded. Immediate.
+//   2. The heartbeat watchdog — the worker is alive but has stopped talking (a wedged
+//      fetch, a suspended worker that never emits a disconnect).
+//   3. The absolute ceiling — last resort, above the background's own 60s analyze
+//      timeout plus network slack, so a legitimately slow analysis still wins.
+//
+// None of them is a failure state: each resolves like any other unreachable-backend
+// result, so the local heuristic runs and the page still gets simplified.
+const ANALYZE_PORT = 'distill-analyze'
+// Four missed 5s heartbeats. Long enough to ride out a busy main thread, short enough
+// that a stall is caught in seconds rather than at the ceiling.
+const HEARTBEAT_TIMEOUT_MS = 20000
+const ANALYSIS_HARD_TIMEOUT_MS = 70000
+
 function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendResult> {
   const extraction = extractPage()
+
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      {
-        type: 'DISTILL_ANALYZE_PAGE',
-        payload: { ...extraction, profile },
-      },
-      (response: AnalyzeBackendResult | undefined) => {
-        if (chrome.runtime.lastError || !response) {
-          resolve({
-            ok: false,
-            error: chrome.runtime.lastError?.message || 'No response from background service worker',
-          })
-          return
-        }
-        resolve(response)
-      },
+    let settled = false
+    let watchdog = 0
+    let ceiling = 0
+    let port: chrome.runtime.Port
+
+    // First one home wins; every later path is a no-op.
+    const settle = (result: AnalyzeBackendResult) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(watchdog)
+      window.clearTimeout(ceiling)
+      try {
+        port.disconnect()
+      } catch {
+        // Already gone.
+      }
+      resolve(result)
+    }
+
+    // Re-armed by every heartbeat, so the deadline tracks "last sign of life" rather
+    // than the start of the request.
+    const armWatchdog = () => {
+      window.clearTimeout(watchdog)
+      watchdog = window.setTimeout(
+        () => settle({ ok: false, error: `Background service worker stopped responding (no heartbeat for ${HEARTBEAT_TIMEOUT_MS}ms)` }),
+        HEARTBEAT_TIMEOUT_MS,
+      )
+    }
+
+    try {
+      port = chrome.runtime.connect({ name: ANALYZE_PORT })
+    } catch (err) {
+      // Extension context invalidated (reload/update) — there is nothing to connect to.
+      resolve({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      return
+    }
+
+    port.onMessage.addListener((message) => {
+      if (message?.type === 'heartbeat') {
+        armWatchdog()
+        return
+      }
+      if (message?.type === 'result') settle(message.result as AnalyzeBackendResult)
+    })
+
+    port.onDisconnect.addListener(() => {
+      settle({
+        ok: false,
+        error: chrome.runtime.lastError?.message || 'Background service worker disconnected before answering',
+      })
+    })
+
+    ceiling = window.setTimeout(
+      () => settle({ ok: false, error: `No response from background service worker after ${ANALYSIS_HARD_TIMEOUT_MS}ms` }),
+      ANALYSIS_HARD_TIMEOUT_MS,
     )
+    armWatchdog()
+
+    port.postMessage({ type: 'analyze', payload: { ...extraction, profile } })
   })
 }
 
@@ -96,7 +160,7 @@ function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendR
 async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResult> {
   const prefiltered = prefilterPage()
   console.log(
-    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s) and blurred ${prefiltered.deemphasized} secondary region(s) before analysis`,
+    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s) before analysis (nothing is blurred until it returns)`,
   )
 
   const result = await requestBackendAnalysis(await profileFor(settings))
@@ -142,8 +206,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // Activate only — restoring the page does not replay it.
       const settings: SimplifySettings = { ...FALLBACK_SETTINGS, ...(message.settings ?? {}) }
       const stopScan = startScanAnimation()
+      // Closing the side panel while the scan runs closes the channel this reply goes
+      // down, and sendResponse then throws. That must not be mistaken for the analysis
+      // failing: unguarded, the throw lands in the .catch below, which rolls the whole
+      // page back — so closing the panel would silently undo the simplification the
+      // user asked for. Nobody is listening either way, so the failure is ignorable.
+      const respond = (payload: SimplifyResponse) => {
+        try {
+          sendResponse(payload)
+        } catch {
+          // Panel already gone.
+        }
+      }
       handleSimplify(settings)
-        .then((result) => sendResponse({ ok: true, ...result } satisfies SimplifyResponse))
+        .then((result) => respond({ ok: true, ...result } satisfies SimplifyResponse))
         .catch((err) => {
           console.error('[Distill] simplify failed:', err)
           // prefilterPage() has already hidden ads and blurred secondary content by
@@ -151,7 +227,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           // added on the success paths. Rolling back is the one state we can still
           // guarantee is coherent, and it's the state the panel will show.
           restoreOriginalPage()
-          sendResponse({
+          respond({
             ok: false,
             error: err instanceof Error ? err.message : String(err),
           } satisfies SimplifyResponse)

@@ -11,6 +11,12 @@ export default defineConfig({
     // All three extension bundles share dist/. Production builds opt into
     // cleaning via the CLI; watch builds must preserve sibling bundles.
     emptyOutDir: false,
+    // sidepanel.html and calibration.html share a chunk, so Vite emits a
+    // <link rel="modulepreload"> for it. An extension page loads in an isolated
+    // world where Chrome refuses that preload ("cross-world extension resource
+    // mismatch") and warns on every open; the chunk is then fetched normally by the
+    // import anyway. Two small pages — dropping the preload costs nothing.
+    modulePreload: false,
     rollupOptions: {
       input: {
         sidepanel: resolve(import.meta.dirname, 'sidepanel.html'),

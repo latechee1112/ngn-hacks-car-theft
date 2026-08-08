@@ -1,6 +1,7 @@
 import type { BlockAction, LayoutSettings } from '../types/analysis'
 import {
   AD_HIDDEN_CLASS,
+  DEEMPHASIZE_CLASS,
   isAdLike,
   isAdNetworkFrame,
   isPopupLike,
@@ -8,9 +9,13 @@ import {
   isSponsoredLabel,
   isStickyOrFixed,
   isVisible,
+  SECTION_HIDDEN_CLASS,
+  UNSTICK_FIXED_CLASS,
+  UNSTICK_STICKY_CLASS,
 } from './dom-heuristics'
 import { FF_ID_ATTR } from './extract'
 import { pruneDetachedOriginals, restoreAllOriginal, saveOriginal } from './originalState'
+import { applySiteRules, findSiteRule, HARD_BLUR_CLASS } from './siteRules'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
 const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
@@ -18,12 +23,8 @@ const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
 const READING_COLUMN_CLASS = 'distill-reading-column'
-const DEEMPHASIZE_CLASS = 'distill-deemphasize'
-const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
-const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
 const NEUTRAL_COLOR = '#1a1a1a'
-const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
 const PROGRESSIVE_CONTROLS_ID = 'distill-progressive-controls'
 const SECTION_HEADING_SELECTOR = /^h[23]$/i
 const BLUR_INTENSITY_PROP = '--distill-blur-intensity'
@@ -78,9 +79,12 @@ function isProseLike(el: Element): boolean {
 }
 
 // Marks an element as the primary region, and gives it the reading column only if it
-// actually reads like an article.
+// actually reads like an article — and only if the page's site rule (if any) hasn't
+// opted out, which is how a hand-tuned page keeps its own layout and gets nothing but
+// the blur it asked for.
 function markPrimary(el: Element): void {
   el.classList.add(PRIMARY_CLASS)
+  if (findSiteRule()?.disableReadingColumn) return
   if (isProseLike(el)) el.classList.add(READING_COLUMN_CLASS)
 }
 
@@ -279,7 +283,11 @@ function collectSidebarColumns(): Element[] {
   return found
 }
 
-function collectSecondaryTargets(primary: Element | null): Element[] {
+// `spared` holds the blocks the backend explicitly ruled 'keep' or 'emphasize'. This
+// pass runs after the backend's, so without that list it would re-blur, on shape alone,
+// blocks the model just read the page and decided to keep — the exact precedence the
+// emphasize/keep cases exist to establish.
+function collectSecondaryTargets(primary: Element | null, spared: Element[] = []): Element[] {
   const targets = new Set<Element>()
 
   const consider = (el: Element) => {
@@ -289,6 +297,9 @@ function collectSecondaryTargets(primary: Element | null): Element[] {
     if (primary && (el === primary || el.contains(primary) || primary.contains(el))) return
     if (el === document.body || el === document.documentElement) return
     if (el.closest(`.${AD_HIDDEN_CLASS}`)) return
+    // Blurring an ancestor blurs the spared block with it, so overlap in either
+    // direction disqualifies the target.
+    if (spared.some((keep) => keep === el || keep.contains(el) || el.contains(keep))) return
     targets.add(el)
   }
 
@@ -298,8 +309,8 @@ function collectSecondaryTargets(primary: Element | null): Element[] {
   return pruneNested(Array.from(targets))
 }
 
-function deemphasizeSecondary(primary: Element | null): number {
-  const targets = collectSecondaryTargets(primary)
+function deemphasizeSecondary(primary: Element | null, spared: Element[] = []): number {
+  const targets = collectSecondaryTargets(primary, spared)
   targets.forEach((el) => {
     saveOriginal(el)
     el.classList.add(DEEMPHASIZE_CLASS)
@@ -314,20 +325,24 @@ function deemphasizeSecondary(primary: Element | null): number {
 // clutter go immediately instead of waiting on a network round-trip, and extractPage()
 // then skips these blocks, so the backend only spends its judgement on the genuinely
 // ambiguous rest of the page.
+//
+// Ads only. This pass used to blur secondary content too, which meant a guessed blur
+// landed while the scan animation was still running and was then revised a second or
+// two later when the analysis came back — the user watched the page shift under a
+// sweep that is supposed to mean "still deciding". Nothing is blurred until the
+// analysis is in; hiding an ad is a removal, not a blur, and nothing later revises it,
+// so that part stays immediate.
 export interface PrefilterResult {
   adsHidden: number
-  deemphasized: number
 }
 
 export function prefilterPage(): PrefilterResult {
   injectGlobalStyle()
   // Nothing is marked primary yet (the backend hasn't answered), so the local
-  // article detector supplies the "don't touch this" region for both passes.
-  const primary = findPrimaryContent()
-  const adsHidden = hideAds(primary)
-  const deemphasized = deemphasizeSecondary(primary)
+  // article detector supplies the "don't touch this" region.
+  const adsHidden = hideAds(findPrimaryContent())
   startAdObserver()
-  return { adsHidden, deemphasized }
+  return { adsHidden }
 }
 
 function hideAds(primary: Element | null, roots?: Element[]): number {
@@ -455,6 +470,32 @@ html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h3 {
 .${DEEMPHASIZE_CLASS} a[href] {
   opacity: 1 !important;
   filter: none !important;
+}
+/* Hand-tuned per-site targets (siteRules.ts). Unlike .${DEEMPHASIZE_CLASS}, this does
+   NOT exempt nested links/buttons — every one of these targets (Like button, team
+   member links, tab links) is interactive, and blurring social proof only works if it
+   covers those too. Hover still reveals, so nothing becomes unreachable, and
+   pointer-events stay on so the revealed control is clickable. */
+.${HARD_BLUR_CLASS},
+.${HARD_BLUR_CLASS} a[href],
+.${HARD_BLUR_CLASS} button,
+.${HARD_BLUR_CLASS} img {
+  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
+  transition: filter 0.2s ease, opacity 0.2s ease !important;
+}
+.${HARD_BLUR_CLASS} {
+  opacity: 0.5 !important;
+}
+.${HARD_BLUR_CLASS}:hover,
+.${HARD_BLUR_CLASS}:focus-within,
+.${HARD_BLUR_CLASS}:hover a[href],
+.${HARD_BLUR_CLASS}:focus-within a[href],
+.${HARD_BLUR_CLASS}:hover button,
+.${HARD_BLUR_CLASS}:focus-within button,
+.${HARD_BLUR_CLASS}:hover img,
+.${HARD_BLUR_CLASS}:focus-within img {
+  filter: none !important;
+  opacity: 1 !important;
 }
 /* Un-sticking must not change layout. position:static would drop a fixed header into
    normal flow, pushing everything below it down — on a site whose hero sizes itself
@@ -608,6 +649,11 @@ export function applySimplification(): SimplifyResult {
 
   pauseAutoplayMedia()
   injectGlobalStyle()
+  // The only place the hand-tuned blur is applied: after the analysis, so the page
+  // never flickers mid-load, and last, so a backend 'keep'/'emphasize' on a block
+  // that overlaps a hand-tuned region can't un-blur it — a hardcoded rule is a
+  // deliberate choice and outranks any inference.
+  applySiteRules()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
   startAdObserver()
@@ -635,6 +681,9 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
 
   let primaryFound = false
   let deemphasizedCount = 0
+  // Blocks the backend explicitly wants left alone. Collected so the shape-based
+  // secondary sweep below can't overrule the model that actually read the page.
+  const spared: Element[] = []
 
   actions.forEach((action) => {
     const el = findByBlockId(action.blockId)
@@ -642,12 +691,9 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
     saveOriginal(el)
 
     switch (action.action) {
-      // emphasize/keep also clear any blur the local pre-filter put on this block:
-      // the pre-filter guesses from shape alone, the backend actually read the page,
-      // so where they disagree the backend wins.
       case 'emphasize':
-        el.classList.remove(DEEMPHASIZE_CLASS)
         markPrimary(el)
+        spared.push(el)
         primaryFound = true
         break
       case 'deemphasize':
@@ -661,7 +707,7 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
         el.classList.add(SECTION_HIDDEN_CLASS)
         break
       case 'keep':
-        el.classList.remove(DEEMPHASIZE_CLASS)
+        spared.push(el)
         break
       default:
         break
@@ -675,10 +721,22 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
   // Runs regardless of what the backend returned: ads are a client-side call the
   // extraction can't always see (cross-origin frames, feed units injected after
   // extraction), so this pass is not conditional on any action list.
-  const adsHidden = hideAds(document.querySelector(`.${PRIMARY_CLASS}`))
+  const primary = getPrimaryElement() ?? findPrimaryContent()
+  const adsHidden = hideAds(primary)
+
+  // The obvious-secondary sweep (rails, footers, "related" modules) used to run in the
+  // pre-filter, before the analysis. It happens here now so that nothing blurs while
+  // the scan animation is still playing — and since it lands after the actions, it is
+  // told which blocks the backend spared so it can't overrule them.
+  deemphasizedCount += deemphasizeSecondary(primary, spared)
 
   pauseAutoplayMedia()
   injectGlobalStyle()
+  // The only place the hand-tuned blur is applied: after the analysis, so the page
+  // never flickers mid-load, and last, so a backend 'keep'/'emphasize' on a block
+  // that overlaps a hand-tuned region can't un-blur it — a hardcoded rule is a
+  // deliberate choice and outranks any inference.
+  applySiteRules()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
   startAdObserver()
