@@ -16,6 +16,14 @@ export const FF_ID_ATTR = 'data-distill-id'
 const TEXT_MAX = 300
 const LINK_GROUP_MIN_LINKS = 4
 
+// Mirror of the backend's PageBlock field bounds. A value over these used to fail
+// the whole request with 422 — every block on the page lost because one element
+// had a long custom tag name. The server now truncates rather than rejects, but
+// staying inside the contract here keeps the payload smaller and means an older
+// backend build still works.
+const TAG_MAX = 64
+const ROLE_MAX = 64
+
 // Hard ceiling on what one analysis request may contain. Two separate limits make
 // this necessary, and the tighter one is time, not count:
 //
@@ -261,9 +269,12 @@ function buildBlock(el: Element, counter: { n: number }, opts: { repeatedLink?: 
   }
   return {
     blockId: id,
-    tag: el.tagName.toLowerCase(),
+    // Clamped to the backend's PageBlock bounds. Web components have no length
+    // convention — YouTube renders <yt-thumbnail-bottom-overlay-view-model>, 38
+    // characters — and the server's own limits are what the payload has to fit.
+    tag: el.tagName.toLowerCase().slice(0, TAG_MAX),
     landmark: landmarkOf(el),
-    role: roleOf(el),
+    role: roleOf(el).slice(0, ROLE_MAX),
     text: textOf(el),
     isInteractive: isInteractiveOf(el),
     isFormControl: isFormControlOf(el),

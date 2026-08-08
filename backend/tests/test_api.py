@@ -79,3 +79,33 @@ def test_analyze_page_never_collapses_safety_critical_at_max_strength(client):
     actions = {a["blockId"]: a["action"] for a in resp.json()["actions"]}
     assert actions["b1"] != "collapse"
     assert actions["b2"] == "collapse"
+
+
+def test_over_length_tag_is_truncated_not_rejected():
+    """One web-component tag must not cost the whole page its analysis.
+
+    Regression: YouTube renders <yt-thumbnail-bottom-overlay-view-model> (38
+    chars). Against the old 32-char cap that 422'd the entire request, so every
+    other block on the page was lost with it.
+    """
+    from models.common import PageBlock
+
+    block = PageBlock(
+        blockId="ff-1",
+        tag="yt-thumbnail-bottom-overlay-view-model",
+        role="x" * 200,
+        landmark="y" * 200,
+        text="z" * 5000,
+    )
+
+    assert block.tag == "yt-thumbnail-bottom-overlay-view-model"
+    assert len(block.role) == 64
+    assert len(block.landmark) == 32
+    assert len(block.text) == 2000
+
+
+def test_extremely_long_tag_is_clamped_to_the_field_bound():
+    from models.common import PageBlock
+
+    block = PageBlock(blockId="ff-1", tag="custom-element-" + "x" * 500)
+    assert len(block.tag) == 64
