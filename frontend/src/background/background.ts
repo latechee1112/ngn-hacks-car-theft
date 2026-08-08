@@ -9,8 +9,13 @@ const BACKEND_URL = 'http://127.0.0.1:8000'
 // page takes much longer for the LLM to classify than a tiny 4-block payload).
 const ANALYZE_TIMEOUT_MS = 60000
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   console.log('[Distill] service worker installed')
+  // First install only — walks the user through the calibration wizard in a
+  // full tab (a popup is capped at ~600x800px, nowhere near "full screen").
+  if (details.reason === 'install') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('calibration.html') }).catch(console.error)
+  }
 })
 
 async function analyzePage(payload: unknown): Promise<AnalyzeBackendResult> {

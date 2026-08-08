@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Same design tokens as sidepanel/index.css — copied rather than imported,
+   since that file's `body` rule is popup-sized (fixed 380x600) and this is
+   a full browser tab. */
+@theme {
+  --color-background: #121212;
+  --color-surface: #1a1a1a;
+  --color-surface-hover: #222222;
+  --color-outline: #2b2b2b;
+  --color-outline-strong: #3a3a3a;
+  --color-on-background: #f2f2f2;
+  --color-on-surface: #d6d6d6;
+  --color-on-surface-variant: #8f8f8f;
+  --color-on-surface-muted: #6b6b6b;
+
+  --color-accent: #2f6fb5;
+  --color-accent-hover: #275c96;
+  --color-accent-fg: #ffffff;
+  --color-accent-text: #6fb0e8;
+
+  --color-danger-text: #e79a94;
+
+  --font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+
+  --text-meta: 11px;
+  --text-meta--line-height: 16px;
+  --text-body: 13px;
+  --text-body--line-height: 20px;
+  --text-title: 15px;
+  --text-title--line-height: 20px;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Gentle drift for the "motion" trial's distractor shapes. */
+@keyframes trial-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(6px);
+  }
+}
