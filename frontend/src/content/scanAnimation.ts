@@ -25,6 +25,28 @@
 const SCAN_HOST_TAG = 'distill-scan'
 const SCAN_HOST_ID = 'distill-scan-layer'
 
+// Sites built heavily on web components (Reddit's shreddit UI among them) ship a
+// hygiene rule along the lines of `:not(:defined) { visibility: hidden }`, to hide
+// their OWN custom elements until the matching JS has registered and upgraded them
+// (avoiding a flash of unstyled content). SCAN_HOST_TAG is a hyphenated,
+// component-shaped name for the reasons above - but that also makes it match
+// `:not(:defined)` on any site with that rule, since this element is never
+// registered. The effect was the whole sweep silently painting with
+// visibility:hidden: correct geometry, correct opacity, invisible regardless -
+// confirmed live against reddit.com, where getComputedStyle(host).visibility
+// flipped from 'hidden' to 'visible' the instant the tag was registered.
+// Defining it (even as a no-op class) makes it ":defined", so that class of rule
+// no longer matches it - on any site, not just Reddit.
+let scanHostDefined = false
+function ensureScanHostDefined(): void {
+  if (scanHostDefined || customElements.get(SCAN_HOST_TAG)) {
+    scanHostDefined = true
+    return
+  }
+  customElements.define(SCAN_HOST_TAG, class extends HTMLElement {})
+  scanHostDefined = true
+}
+
 // Three phases: INTRO plays once (grid wipes in, first beam pass). LOOP
 // repeats indefinitely after that — for as long as the backend call is in
 // flight, however long that turns out to be. OUTRO plays once stop() is
@@ -234,6 +256,7 @@ export function startScanAnimation(): () => void {
   // layer this call is about to create.
   activeSweep?.()
   removeOrphanScanLayers()
+  ensureScanHostDefined()
 
   const reduced = prefersReducedMotion()
   const introMs = reduced ? REDUCED_INTRO_MS : INTRO_MS

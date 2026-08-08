@@ -10,7 +10,12 @@ export const DEFAULT_PROFILE: VisualProfile = {
   spacingMultiplier: 1.4,
   textScale: 1.15,
   contrastMode: 'enhanced',
-  reduceMotion: true,
+  // Off by default - a real OS-level "prefers-reduced-motion" preference
+  // still suppresses motion independently (see scanAnimation.ts's
+  // prefersReducedMotion()), so this only controls Distill's own opinion,
+  // not actual accessibility. Defaulting it on suppressed the scan-sweep
+  // animation for every uncalibrated user.
+  reduceMotion: false,
   progressiveReveal: false,
   simplificationStrength: 0.6,
   source: 'manual',

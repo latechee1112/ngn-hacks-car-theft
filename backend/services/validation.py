@@ -58,9 +58,9 @@ def validate_and_build_actions(
             # The rule engine's hard safety classification always wins.
             label = ClassificationLabel.SAFETY_CRITICAL
 
-        # action_for_category never returns COLLAPSE for a protected block, so
-        # safety-critical/form-control/form-instruction content can't be
-        # collapsed here regardless of what label the LLM assigned.
+        # action_for_category never returns COLLAPSE at all - the LLM/rule
+        # classification can only dim content, never fully remove it - so
+        # nothing here can end up hidden regardless of what label the LLM assigned.
         action = action_for_category(label, block, profile)
 
         actions.append(

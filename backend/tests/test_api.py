@@ -66,7 +66,11 @@ def test_analyze_page_rejects_malformed_block(client):
     assert resp.status_code == 422
 
 
-def test_analyze_page_never_collapses_safety_critical_at_max_strength(client):
+def test_analyze_page_never_collapses_anything_even_at_max_strength(client):
+    # Full removal (display:none) is reserved for the frontend's own local,
+    # high-confidence ad/tracker detection - the backend's classification
+    # can only dim content, at any strength, since a wrong dim is
+    # recoverable by eye and a wrong disappearance is not.
     payload = {
         "profile": _profile(simplificationStrength=1.0),
         "blocks": [
@@ -78,7 +82,7 @@ def test_analyze_page_never_collapses_safety_critical_at_max_strength(client):
     assert resp.status_code == 200
     actions = {a["blockId"]: a["action"] for a in resp.json()["actions"]}
     assert actions["b1"] != "collapse"
-    assert actions["b2"] == "collapse"
+    assert actions["b2"] != "collapse"
 
 
 def test_over_length_tag_is_truncated_not_rejected():
