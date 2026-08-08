@@ -34,6 +34,8 @@ def make_profile():
 
 
 def make_blocks():
+    # A bare <div> with no landmark and no signals classifies as Uncertain, which
+    # is precisely what needs_llm_review() sends to the model.
     return [PageBlock(blockId="b1", tag="div", text="hello")]
 
 
@@ -64,11 +66,21 @@ def test_malformed_json_raises_llm_classification_error(mock_openai_cls):
 
 
 @patch("services.llm_classifier.OpenAI")
-def test_invalid_label_raises_llm_classification_error(mock_openai_cls):
+def test_out_of_range_index_raises_llm_classification_error(mock_openai_cls):
+    """An index for a block that was never sent means the model was not answering
+    about this page - the whole response goes to the rule engine."""
     mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = _mock_completion(
-        '{"classifications": [{"blockId": "b1", "label": "NotARealLabel"}]}'
-    )
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [7], "S": [], "D": []}')
+    mock_openai_cls.return_value = mock_client
+
+    with pytest.raises(LLMClassificationError):
+        classify_blocks(make_blocks(), make_profile(), None, make_settings())
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_contradictory_index_raises_llm_classification_error(mock_openai_cls):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [0], "S": [], "D": [0]}')
     mock_openai_cls.return_value = mock_client
 
     with pytest.raises(LLMClassificationError):
@@ -86,11 +98,9 @@ def test_empty_content_raises_llm_classification_error(mock_openai_cls):
 
 
 @patch("services.llm_classifier.OpenAI")
-def test_valid_response_parses_correctly(mock_openai_cls):
+def test_valid_response_expands_indices_to_block_ids(mock_openai_cls):
     mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = _mock_completion(
-        '{"classifications": [{"blockId": "b1", "label": "Essential", "reason": "main content"}]}'
-    )
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [0], "S": [], "D": []}')
     mock_openai_cls.return_value = mock_client
 
     result = classify_blocks(make_blocks(), make_profile(), None, make_settings())
@@ -100,18 +110,59 @@ def test_valid_response_parses_correctly(mock_openai_cls):
 
 
 @patch("services.llm_classifier.OpenAI")
-def test_unrequested_reason_field_is_ignored_not_rejected(mock_openai_cls):
-    """A model that emits a reason anyway must not invalidate the response -
-    that would dump the whole page onto the rule-engine fallback."""
+def test_empty_arrays_mean_full_agreement_with_the_rules(mock_openai_cls):
+    """Omission is the default: no corrections is a valid, cheap answer, not a
+    failure. Validation then fills every block from the rule engine."""
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [], "S": [], "D": []}')
+    mock_openai_cls.return_value = mock_client
+
+    assert classify_blocks(make_blocks(), make_profile(), None, make_settings()) == []
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_unrequested_extra_key_is_ignored_not_rejected(mock_openai_cls):
+    """A chatty model must not invalidate the response - that would dump the whole
+    page onto the rule-engine fallback."""
     mock_client = MagicMock()
     mock_client.chat.completions.create.return_value = _mock_completion(
-        '{"classifications": [{"blockId": "b1", "label": "Essential", "reason": "chatty"}]}'
+        '{"E": [0], "S": [], "D": [], "notes": "block 0 is the article"}'
     )
     mock_openai_cls.return_value = mock_client
 
     result = classify_blocks(make_blocks(), make_profile(), None, make_settings())
     assert result[0].label == "Essential"
-    assert not hasattr(result[0], "reason")
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_confident_page_skips_the_request_entirely(mock_openai_cls):
+    """No ambiguous blocks means no round-trip at all - the speedup that matters
+    most on pages the rules already understand."""
+    mock_openai_cls.return_value = MagicMock()
+    blocks = [
+        PageBlock(blockId="b1", tag="article", landmark="article", text="the story"),
+        PageBlock(blockId="b2", tag="div", text="ad", isAd=True),
+    ]
+
+    assert classify_blocks(blocks, make_profile(), None, make_settings()) == []
+    mock_openai_cls.return_value.chat.completions.create.assert_not_called()
+
+
+@patch("services.llm_classifier.OpenAI")
+def test_only_ambiguous_blocks_are_sent(mock_openai_cls):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_completion('{"E": [], "S": [], "D": []}')
+    mock_openai_cls.return_value = mock_client
+
+    blocks = [
+        PageBlock(blockId="decided", tag="article", landmark="article", text="the story"),
+        PageBlock(blockId="ambiguous", tag="div", text="who knows"),
+    ]
+    classify_blocks(blocks, make_profile(), None, make_settings())
+
+    sent = mock_client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+    assert '"who knows"' in sent
+    assert "the story" not in sent
 
 
 def test_projection_drops_safety_flags_and_truncates_text():
@@ -128,17 +179,21 @@ def test_projection_drops_safety_flags_and_truncates_text():
         boundingBox={"x": 0.123456, "y": 0.654321, "width": 0.5, "height": 0.25},
     )
 
-    projected = _project_for_llm(block)
+    projected = _project_for_llm(block, 3)
 
     assert set(projected) == {
-        "blockId",
+        "i",
         "tag",
         "role",
         "elementType",
         "isInteractive",
         "textPreview",
+        "provisionalLabel",
         "roughPosition",
     }
+    # Indexed, not keyed on blockId: the model cannot invent an ID it never saw.
+    assert projected["i"] == 3
+    assert "blockId" not in projected
     assert len(projected["textPreview"]) == _TEXT_PREVIEW_MAX
     # Safety is decided server-side in validation, never by the LLM.
     assert "isSafetyCritical" not in projected

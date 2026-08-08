@@ -55,6 +55,39 @@ def classify_block(block: PageBlock) -> ClassificationLabel:
     return ClassificationLabel.UNCERTAIN
 
 
+def needs_llm_review(block: PageBlock) -> bool:
+    """Whether this block's rule classification is a guess worth spending tokens on.
+
+    Latency is linear in how many blocks the LLM has to emit a decision for, so
+    the cheapest speedup available is to not ask about blocks the rules already
+    decide confidently. Two cases are genuinely uncertain:
+
+      - UNCERTAIN itself: the rules found no signal at all.
+      - DISTRACTING inferred purely from a landmark/tag (nav, aside, footer).
+        That is a guess about page furniture, and it is wrong exactly when a
+        site puts real content in an <aside> - the case where a model's reading
+        of the text earns its keep.
+
+    Everything else is skipped: safety-critical and ad/promo/autoplay/repeated-link
+    are hard signals, main/article is the safe direction, and a Supporting block
+    is kept either way so the label cannot change the outcome.
+    """
+    if block.is_safety_critical():
+        return False
+
+    category = classify_block(block)
+    if category == ClassificationLabel.UNCERTAIN:
+        return True
+    if category == ClassificationLabel.DISTRACTING:
+        return not (
+            block.is_ad
+            or block.is_sticky_promo
+            or block.is_autoplay_media
+            or block.is_repeated_link
+        )
+    return False
+
+
 def action_for_category(
     category: ClassificationLabel, block: PageBlock, profile: VisualProfile
 ) -> ActionType:
