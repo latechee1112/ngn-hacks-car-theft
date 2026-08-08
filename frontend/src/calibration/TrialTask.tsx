@@ -54,6 +54,7 @@ function TrialTask({
 
   function handleClick(shape: Shape) {
     if (doneRef.current) return
+    console.log('[Distill] shape click', { index: shape.index, isTarget: shape.isTarget })
     if (shape.isTarget) {
       finish(true)
     } else {
@@ -64,6 +65,7 @@ function TrialTask({
   function handleDecoyClick() {
     if (doneRef.current) return
     decoyClicksRef.current += 1
+    console.log('[Distill] decoy click', { count: decoyClicksRef.current })
   }
 
   const gapClass = trial.variant === 'spacing' ? 'gap-8' : 'gap-3'
