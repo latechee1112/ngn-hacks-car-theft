@@ -7,8 +7,5 @@
     "dev:ui": "npm --prefix frontend run dev:ui",
     "build": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint"
-  },
-  "dependencies": {
-    "webeyetrack": "^0.0.2"
   }
 }

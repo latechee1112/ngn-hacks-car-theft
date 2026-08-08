@@ -87,14 +87,57 @@ def test_manual_preference_forces_reduced_motion_even_without_trial_evidence():
     assert result.profile.reduce_motion is True
 
 
-def test_gaze_data_only_corroborates_and_never_triggers_a_rule_alone():
+def test_object_count_gaze_still_only_corroborates_the_clutter_rule():
+    # _apply_gaze_support (the object-count clutter corroboration) is
+    # unchanged: gaze alone, with no trials at all, still can't make the
+    # clutter rule itself fire - there's nothing here for it to corroborate.
     request = CalibrationRequest(
         trials=[],
         gazeSummary=GazeSummary(enabled=True, sampleCount=500, distractorGazeRatio=0.9),
     )
     result = generate_profile(request)
     assert result.profile.max_visible_blocks == 10
-    assert not any("Gaze" in e for e in result.explanation)
+
+
+def test_decoy_clicks_alone_reduce_max_visible_blocks():
+    trials = [CalibrationTrial(distractorClickCount=1) for _ in range(5)]
+    result = generate_profile(CalibrationRequest(trials=trials))
+    assert result.profile.max_visible_blocks == 6
+    assert any("decoy" in e.lower() for e in result.explanation)
+
+
+def test_decoy_gaze_alone_does_not_change_max_visible_blocks_but_nudges_strength():
+    baseline = generate_profile(CalibrationRequest(trials=[])).profile.simplification_strength
+    request = CalibrationRequest(
+        trials=[],
+        gazeSummary=GazeSummary(enabled=True, sampleCount=200, distractorGazeRatio=0.4),
+    )
+    result = generate_profile(request)
+    assert result.profile.max_visible_blocks == 10
+    assert result.profile.simplification_strength == round(baseline + 0.10, 2)
+    assert any("softer signal" in e.lower() for e in result.explanation)
+
+
+def test_decoy_gaze_ratio_ignored_below_minimum_sample_count():
+    request = CalibrationRequest(
+        trials=[],
+        gazeSummary=GazeSummary(enabled=True, sampleCount=10, distractorGazeRatio=0.9),
+    )
+    result = generate_profile(request)
+    assert result.profile.max_visible_blocks == 10
+    assert not any("decoy" in e.lower() for e in result.explanation)
+
+
+def test_decoy_clicks_and_gaze_together_add_extra_strength_beyond_clutter_bump():
+    trials = [CalibrationTrial(distractorClickCount=1) for _ in range(5)]
+    clicks_only = generate_profile(CalibrationRequest(trials=trials)).profile.simplification_strength
+    request = CalibrationRequest(
+        trials=trials,
+        gazeSummary=GazeSummary(enabled=True, sampleCount=200, distractorGazeRatio=0.4),
+    )
+    result = generate_profile(request)
+    assert result.profile.max_visible_blocks == 6
+    assert result.profile.simplification_strength == round(clicks_only + 0.05, 2)
 
 
 def test_profile_generation_is_deterministic_across_calls():

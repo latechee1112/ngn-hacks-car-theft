@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CalibrationTrial } from '../types/calibration'
+import Decoys from './gaze/Decoys'
 import { TRIAL_TIMEOUT_MS, type TrialConfig } from './trials'
 
 interface Shape {
@@ -28,6 +29,7 @@ function TrialTask({
   // Refs, not state: click/timeout handlers need the current count and a
   // one-shot guard without waiting on a re-render.
   const errorsRef = useRef(0)
+  const decoyClicksRef = useRef(0)
   const startRef = useRef(performance.now())
   const doneRef = useRef(false)
 
@@ -44,6 +46,7 @@ function TrialTask({
       objectCount: trial.objectCount,
       completionTimeMs: performance.now() - startRef.current,
       errorCount: errorsRef.current,
+      distractorClickCount: decoyClicksRef.current,
       condition: trial.condition,
       success,
     })
@@ -58,10 +61,16 @@ function TrialTask({
     }
   }
 
+  function handleDecoyClick() {
+    if (doneRef.current) return
+    decoyClicksRef.current += 1
+  }
+
   const gapClass = trial.variant === 'spacing' ? 'gap-8' : 'gap-3'
 
   return (
     <div className="flex flex-col items-center gap-8">
+      <Decoys onDecoyClick={handleDecoyClick} />
       <p className="text-body text-on-surface">{trial.instructions}</p>
       <div className={`grid grid-cols-5 ${gapClass}`}>
         {shapes.map((shape) => (

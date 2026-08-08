@@ -20,6 +20,11 @@ class CalibrationTrial(BaseModel):
         default=None, alias="completionTimeMs", ge=0
     )
     error_count: Optional[int] = Field(default=None, alias="errorCount", ge=0)
+    # Clicks on the decoy sidebar/ad shown alongside every trial - direct
+    # behavioral evidence for the decoy-distraction rule (profile_rules.py).
+    distractor_click_count: Optional[int] = Field(
+        default=None, alias="distractorClickCount", ge=0
+    )
     condition: Optional[str] = Field(
         default=None,
         description="baseline | increasedSpacing | enhancedContrast | reducedMotion | ...",

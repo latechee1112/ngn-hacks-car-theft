@@ -7,6 +7,9 @@ export interface CalibrationTrial {
   objectCount?: number
   completionTimeMs?: number
   errorCount?: number
+  // Clicks on the decoy sidebar/ad shown alongside every trial - direct
+  // behavioral evidence for the backend's decoy-distraction rule.
+  distractorClickCount?: number
   // baseline | increasedSpacing | enhancedContrast | reducedMotion | ...
   condition?: string | null
   success?: boolean

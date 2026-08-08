@@ -1,11 +1,17 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import type { GazeResult } from 'webeyetrack'
 import Icon from '../sidepanel/Icon'
 import {
   CALIBRATION_STORAGE_KEY,
   type CalibrationProfileResponse,
   type CalibrationTrial,
+  type GazeSummary,
   type StoredCalibration,
 } from '../types/calibration'
+import { combineGazeStats, computeTrialGazeStats, type TrialGazeStats } from './gaze/aggregate'
+import DotCalibration from './gaze/DotCalibration'
+import { toPagePoint, type PageGazePoint } from './gaze/hitTest'
+import { useGazeTracker } from './gaze/useGazeTracker'
 import TrialTask from './TrialTask'
 import { TRIALS } from './trials'
 
@@ -39,7 +45,7 @@ async function storeResult(response: CalibrationProfileResponse) {
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-on-surface-variant focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 
-type Step = 'welcome' | 'camera' | 'trials' | 'submitting' | 'results' | 'error' | 'skipped'
+type Step = 'welcome' | 'camera' | 'gazeCalibration' | 'trials' | 'submitting' | 'results' | 'error' | 'skipped'
 
 function PrimaryButton({
   onClick,
@@ -92,7 +98,20 @@ function App() {
   const [trials, setTrials] = useState<CalibrationTrial[]>([])
   const [result, setResult] = useState<CalibrationProfileResponse | null>(null)
   const [error, setError] = useState('')
-  const [cameraNote, setCameraNote] = useState('')
+
+  // Gaze state lives in refs, not React state - samples arrive many times a
+  // second via the tracker's callback and never need a re-render themselves.
+  const gazeEnabledRef = useRef(false)
+  const gazeSamplesRef = useRef<PageGazePoint[]>([])
+  const trialGazeStatsRef = useRef<TrialGazeStats[]>([])
+  const trialStartRef = useRef(0)
+
+  const handleGazeSample = useCallback((result: GazeResult, capturedAt: number) => {
+    const point = toPagePoint(result, capturedAt)
+    if (point) gazeSamplesRef.current.push(point)
+  }, [])
+
+  const tracker = useGazeTracker(handleGazeSample)
 
   function handleSkip() {
     markDismissed()
@@ -100,13 +119,33 @@ function App() {
   }
 
   function enableCamera() {
-    // WebEyeTrack integration lands in a follow-up pass — for now this just
-    // tells the user honestly and moves on, rather than pretending to track.
-    setCameraNote('Camera-based calibration is coming soon — continuing without it for now.')
-    window.setTimeout(() => setStep('trials'), 1200)
+    setStep('gazeCalibration')
+  }
+
+  function handleGazeCalibrationDone() {
+    gazeEnabledRef.current = true
+    trialStartRef.current = performance.now()
+    setStep('trials')
+  }
+
+  function handleGazeCalibrationError(message: string) {
+    console.warn('[Distill] gaze calibration failed, continuing without camera:', message)
+    tracker.stop()
+    gazeEnabledRef.current = false
+    trialStartRef.current = performance.now()
+    setStep('trials')
   }
 
   function handleTrialComplete(outcome: CalibrationTrial) {
+    if (gazeEnabledRef.current) {
+      const trialEnd = performance.now()
+      const windowSamples = gazeSamplesRef.current.filter(
+        (s) => s.capturedAt >= trialStartRef.current && s.capturedAt <= trialEnd,
+      )
+      trialGazeStatsRef.current.push(computeTrialGazeStats(windowSamples, trialStartRef.current))
+      trialStartRef.current = trialEnd
+    }
+
     const next = [...trials, outcome]
     setTrials(next)
     if (trialIndex + 1 < TRIALS.length) {
@@ -117,16 +156,19 @@ function App() {
   }
 
   async function submit(finishedTrials: CalibrationTrial[]) {
+    // Camera is no longer needed once trials are done, win or lose.
+    if (gazeEnabledRef.current) tracker.stop()
+
     setStep('submitting')
     setError('')
     try {
+      const gazeSummary: GazeSummary = gazeEnabledRef.current
+        ? combineGazeStats(trialGazeStatsRef.current)
+        : { enabled: false }
       const response = await fetch(`${BACKEND_URL}/v1/calibration/profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          trials: finishedTrials,
-          gazeSummary: { enabled: false },
-        }),
+        body: JSON.stringify({ trials: finishedTrials, gazeSummary }),
       })
       if (!response.ok) {
         throw new Error(`Backend returned ${response.status}`)
@@ -170,14 +212,21 @@ function App() {
           more specific to you — for example, noticing if your attention keeps drifting to distracting elements.
           Nothing is ever recorded or sent anywhere; it's only used live, on this page, to score the tasks.
         </p>
-        {cameraNote && <p className="text-meta text-accent-text">{cameraNote}</p>}
         <div className="flex gap-3">
-          <PrimaryButton onClick={enableCamera} disabled={!!cameraNote}>
-            Enable camera
-          </PrimaryButton>
+          <PrimaryButton onClick={enableCamera}>Enable camera</PrimaryButton>
           <SecondaryButton onClick={() => setStep('trials')}>Skip — continue without camera</SecondaryButton>
         </div>
       </Shell>
+    )
+  }
+
+  if (step === 'gazeCalibration') {
+    return (
+      <DotCalibration
+        tracker={tracker}
+        onDone={handleGazeCalibrationDone}
+        onError={handleGazeCalibrationError}
+      />
     )
   }
 
