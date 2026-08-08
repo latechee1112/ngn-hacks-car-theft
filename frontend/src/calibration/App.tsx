@@ -300,8 +300,11 @@ function App() {
             // short (vs. the snapshot interval above) so it settles at the
             // new position rather than visibly trailing toward it - the
             // blob's own softness absorbs jitter, so this no longer needs
-            // to be slow to look calm.
-            className="pointer-events-none fixed top-0 left-0 z-50 h-44 w-44 rounded-full bg-[radial-gradient(circle,_rgb(231_154_148_/_55%)_0%,_rgb(231_154_148_/_22%)_45%,_transparent_75%)] opacity-0 blur-sm transition-[opacity,transform] duration-[220ms] ease-out"
+            // to be slow to look calm. Cyan, not accent's blue (#2f6fb5) -
+            // the target shape itself is bg-accent, so the gaze indicator
+            // needs a visibly different hue to stay distinguishable from
+            // what's actually being clicked.
+            className="pointer-events-none fixed top-0 left-0 z-50 h-44 w-44 rounded-full bg-[radial-gradient(circle,_rgb(94_211_255_/_55%)_0%,_rgb(45_170_220_/_22%)_45%,_transparent_75%)] opacity-0 blur-sm transition-[opacity,transform] duration-[220ms] ease-out"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
