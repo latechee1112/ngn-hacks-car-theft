@@ -2,6 +2,9 @@
 venv/
 env/
 
+# JavaScript dependencies are restored from package-lock.json.
+node_modules/
+
 # Environment / secrets — never commit real values.
 # .env.* is ignored broadly; the two lines below explicitly un-ignore the
 # checked-in templates (no real secrets, safe to track).

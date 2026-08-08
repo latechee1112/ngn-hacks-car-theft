@@ -5,6 +5,8 @@ safety net: it always produces a valid result, so the API can degrade to
 it whenever the LLM is unavailable or returns something invalid.
 """
 
+from zlib import crc32
+
 from models.common import ActionType, ClassificationLabel, PageBlock
 from models.profile import VisualProfile
 
@@ -74,14 +76,50 @@ def action_for_category(
     return ActionType.DEEMPHASIZE
 
 
-def reason_for_category(category: ClassificationLabel) -> str:
-    return {
-        ClassificationLabel.SAFETY_CRITICAL: "Safety-critical content",
-        ClassificationLabel.ESSENTIAL: "Primary page content",
-        ClassificationLabel.SUPPORTING: "Supporting content",
-        ClassificationLabel.UNCERTAIN: "Uncertain relevance, kept conservatively",
-        ClassificationLabel.DISTRACTING: "Low-relevance or distracting content",
-    }[category]
+_REASONS_BY_CATEGORY = {
+    ClassificationLabel.SAFETY_CRITICAL: (
+        "Safety-critical content",
+        "Protected: security or consent content",
+        "Kept intact - safety-relevant",
+    ),
+    ClassificationLabel.ESSENTIAL: (
+        "Primary page content",
+        "Core content for this page",
+        "Main reading content",
+    ),
+    ClassificationLabel.SUPPORTING: (
+        "Supporting content",
+        "Secondary content, kept visible",
+        "Supports the main content",
+    ),
+    ClassificationLabel.UNCERTAIN: (
+        "Uncertain relevance, kept conservatively",
+        "Relevance unclear - left untouched",
+        "Ambiguous content, kept to be safe",
+    ),
+    ClassificationLabel.DISTRACTING: (
+        "Low-relevance or distracting content",
+        "Peripheral content, de-emphasized",
+        "Not relevant to the main content",
+    ),
+}
+
+
+def reason_for_category(category: ClassificationLabel, seed: str = "") -> str:
+    """Explainability text for a classified block.
+
+    The LLM no longer generates per-block reasons - asking for a free-text
+    reason on every block dominated decode time, and decode is sequential.
+    These are canned instead. `seed` (pass the block ID) picks between
+    phrasings so a page full of one category doesn't read as copy-paste;
+    it is hashed with crc32 rather than hash() because str hashing is
+    salted per process and would make the same page produce different
+    text on every run.
+    """
+    variants = _REASONS_BY_CATEGORY[category]
+    if not seed:
+        return variants[0]
+    return variants[crc32(seed.encode("utf-8")) % len(variants)]
 
 
 def fallback_action(block: PageBlock, profile: VisualProfile):
@@ -95,7 +133,7 @@ def fallback_action(block: PageBlock, profile: VisualProfile):
         blockId=block.block_id,
         action=action,
         priority=priority,
-        reason=reason_for_category(category),
+        reason=reason_for_category(category, block.block_id),
     )
 
 

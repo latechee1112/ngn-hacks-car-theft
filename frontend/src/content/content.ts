@@ -1,31 +1,62 @@
-import type { AnalyzeBackendResult } from '../types/analysis'
+import type { AnalyzeBackendResult, VisualProfile } from '../types/analysis'
 import { DEFAULT_PROFILE } from './defaultProfile'
 import { extractPage } from './extract'
 import { startScanAnimation } from './scanAnimation'
 import {
   applyBackendActions,
+  applyLayoutPreferences,
   applySimplification,
   canReduceColorVariation,
   canUseProgressiveReveal,
   disableProgressiveReveal,
   enableProgressiveReveal,
+  INCREASED_SPACING_MULTIPLIER,
   isColorVariationReduced,
   isProgressiveRevealOn,
+  isReduceMotionOn,
   isSimplificationActive,
+  isSpacingIncreased,
   restoreOriginalPage,
+  setIncreaseSpacing,
   setReduceColorVariation,
+  setReduceMotion,
   type SimplifyResult,
 } from './simplify'
 
 console.log('[Distill] content script injected on', window.location.href)
 
-function requestBackendAnalysis(): Promise<AnalyzeBackendResult> {
+// The sidepanel's Simplification Controls, as sent with DISTILL_SIMPLIFY.
+export interface SimplifySettings {
+  // 0..1 — the sidepanel's Intensity slider (1-100%) divided by 100.
+  simplificationStrength: number
+  reduceMotion: boolean
+  increaseSpacing: boolean
+}
+
+// Used when the sidepanel sends no settings (older panel build, or a simplify
+// triggered from somewhere other than the panel).
+const FALLBACK_SETTINGS: SimplifySettings = {
+  simplificationStrength: DEFAULT_PROFILE.simplificationStrength,
+  reduceMotion: DEFAULT_PROFILE.reduceMotion,
+  increaseSpacing: DEFAULT_PROFILE.spacingMultiplier > 1,
+}
+
+function profileFor(settings: SimplifySettings): VisualProfile {
+  return {
+    ...DEFAULT_PROFILE,
+    simplificationStrength: settings.simplificationStrength,
+    reduceMotion: settings.reduceMotion,
+    spacingMultiplier: settings.increaseSpacing ? INCREASED_SPACING_MULTIPLIER : 1,
+  }
+}
+
+function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendResult> {
   const extraction = extractPage()
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(
       {
         type: 'DISTILL_ANALYZE_PAGE',
-        payload: { ...extraction, profile: DEFAULT_PROFILE },
+        payload: { ...extraction, profile },
       },
       (response: AnalyzeBackendResult | undefined) => {
         if (chrome.runtime.lastError || !response) {
@@ -43,16 +74,29 @@ function requestBackendAnalysis(): Promise<AnalyzeBackendResult> {
 
 // Backend-driven simplification is the primary path; the local heuristic (no LLM,
 // no task-awareness) is only a fallback for when the backend is unreachable.
-async function handleSimplify(): Promise<SimplifyResult> {
-  const result = await requestBackendAnalysis()
+async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResult> {
+  const result = await requestBackendAnalysis(profileFor(settings))
+
+  let outcome: SimplifyResult
   if (result.ok) {
     console.log(
       `[Distill] backend analysis succeeded: "${result.data.summary}" (${result.data.actions.length} actions, warnings: ${JSON.stringify(result.data.warnings)})`,
     )
-    return applyBackendActions(result.data.actions, result.data.layout)
+    outcome = applyBackendActions(result.data.actions, result.data.layout)
+  } else {
+    console.warn('[Distill] backend analysis unavailable, using local heuristic instead:', result.error)
+    outcome = applySimplification()
   }
-  console.warn('[Distill] backend analysis unavailable, using local heuristic instead:', result.error)
-  return applySimplification()
+
+  // Applied last, on both paths, so the user's explicit toggles override the
+  // backend's suggested layout — and so they still apply when the local
+  // heuristic runs, which sets no layout variables of its own.
+  applyLayoutPreferences({
+    reduceMotion: settings.reduceMotion,
+    increaseSpacing: settings.increaseSpacing,
+  })
+
+  return outcome
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -69,8 +113,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // path — success or failure — or the overlay is stuck on the page
       // until SAFETY_MAX_MS. Activate only — restoring the page does not
       // replay it.
+      const settings: SimplifySettings = { ...FALLBACK_SETTINGS, ...(message.settings ?? {}) }
       const stopScan = startScanAnimation()
-      handleSimplify()
+      handleSimplify(settings)
         .then(sendResponse)
         .catch((err) => {
           console.error('[Distill] simplify failed:', err)
@@ -85,6 +130,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'DISTILL_SET_COLOR_REDUCTION': {
       const applied = setReduceColorVariation(!!message.enabled)
       sendResponse({ applied, active: isColorVariationReduced() })
+      return true
+    }
+    case 'DISTILL_SET_REDUCE_MOTION': {
+      // applied:false just means there is no simplified page yet — the panel
+      // keeps the preference and it ships with the next DISTILL_SIMPLIFY.
+      const applied = setReduceMotion(!!message.enabled)
+      sendResponse({ applied, active: isReduceMotionOn() })
+      return true
+    }
+    case 'DISTILL_SET_SPACING': {
+      const applied = setIncreaseSpacing(!!message.enabled)
+      sendResponse({ applied, active: isSpacingIncreased() })
       return true
     }
     case 'DISTILL_SET_PROGRESSIVE_REVEAL': {
@@ -104,6 +161,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         colorReductionActive: isColorVariationReduced(),
         progressiveRevealAvailable: canUseProgressiveReveal(),
         progressiveRevealActive: isProgressiveRevealOn(),
+        reduceMotionActive: isReduceMotionOn(),
+        spacingIncreased: isSpacingIncreased(),
       })
       return true
     default:

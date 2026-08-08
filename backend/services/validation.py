@@ -68,7 +68,10 @@ def validate_and_build_actions(
                 blockId=c.blockId,
                 action=action,
                 priority=priority_by_label[label],
-                reason=(c.reason or reason_for_category(label))[:200],
+                # The LLM is no longer asked for a reason; this is filled from
+                # the canned table, seeded on block ID so same-label blocks on
+                # one page don't all read identically.
+                reason=reason_for_category(label, c.blockId)[:200],
             )
         )
 
