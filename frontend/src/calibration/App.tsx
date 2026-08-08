@@ -189,6 +189,7 @@ function App() {
   }
 
   function handleTrialComplete(outcome: CalibrationTrial) {
+    console.log('[Distill] trial complete', outcome)
     if (gazeEnabledRef.current) {
       const trialEnd = performance.now()
       const windowSamples = gazeSamplesRef.current.filter(
@@ -226,6 +227,7 @@ function App() {
         throw new Error(`Backend returned ${response.status}`)
       }
       const data = (await response.json()) as CalibrationProfileResponse
+      console.log('[Distill] calibration profile result', data)
       await storeResult(data)
       setResult(data)
       setStep('results')
