@@ -9,3 +9,7 @@ env/
 .env.*
 !.env.example
 !.env.*.example
+
+# Local VS Code workspace settings — points python.envFile at backend/.env,
+# a per-machine convenience, not something to force on other contributors.
+.vscode/
