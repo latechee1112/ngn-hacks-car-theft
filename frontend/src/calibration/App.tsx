@@ -111,18 +111,40 @@ function App() {
   const gazeSamplesRef = useRef<PageGazePoint[]>([])
   const trialGazeStatsRef = useRef<TrialGazeStats[]>([])
   const trialStartRef = useRef(0)
-  // Live gaze-position dot: moved on a fixed snapshot interval (see the
-  // effect below) rather than on every sample, mainly to avoid a DOM write
-  // on every single gaze sample. Jitter-hiding is now the blob's job (its
-  // size/softness and the CSS transition below), not this interval - it
-  // used to be 500ms doing double duty as the anti-jitter mechanism, which
-  // is what made the dot visibly lag real eye movements. latestGazePointRef
-  // just holds the most recent raw sample for that timer to read; it's
-  // written on every sample (cheap, no DOM touch) but only consumed once
-  // per tick.
+  // Gaze samples update a ref without re-rendering React. A lightweight
+  // requestAnimationFrame loop below interpolates the blob between those
+  // samples using compositor-only transforms, so lowering AI inference
+  // frequency does not make its motion look lower-frame-rate.
   const gazeDotRef = useRef<HTMLDivElement | null>(null)
   const latestGazePointRef = useRef<PageGazePoint | null>(null)
-  const GAZE_DOT_SNAPSHOT_MS = 120
+
+  // What's actually drawn on screen chases the raw gaze target at a capped
+  // rate rather than snapping to it every tick - eyes dart (saccades move
+  // essentially instantly), and following that exactly is what read as
+  // "darting"/sudden movement. Deliberately lagging behind fast eye motion,
+  // rather than teleporting with it, is what makes this read as calm.
+  // Separate ref from latestGazePointRef (which still holds the raw, un-
+  // smoothed sample for e.g. trial scoring elsewhere).
+  const displayedPosRef = useRef<{ x: number; y: number } | null>(null)
+  const prevTickAtRef = useRef(0)
+  // Retains the calm follow effect without the previous multi-second trail.
+  // A 1000px move now takes at most ~0.9s instead of ~2.2s.
+  const DISPLAY_MAX_SPEED_PX_MS = 1.1
+
+  // Comet stretch: derived from the *displayed* (already speed-limited)
+  // position's own motion, then smoothed further - see VELOCITY_SMOOTHING.
+  const prevDisplayedPosRef = useRef<{ x: number; y: number } | null>(null)
+  const smoothedVelRef = useRef({ x: 0, y: 0 })
+  // Time-based smoothing behaves consistently on 60Hz and high-refresh
+  // displays instead of depending on how frequently the callback happens.
+  const VELOCITY_SMOOTHING_MS = 160
+  // Below this fraction of DISPLAY_MAX_SPEED_PX_MS, treat as "not moving"
+  // and hold a plain circle - without this, residual jitter below the
+  // smoothing floor still nudges scaleX/scaleY off 1 and makes the
+  // (otherwise invisible-when-circular) rotation visible as a wobble.
+  const SPEED_DEADZONE = 0.2
+  const STRETCH_K = 0.35
+  const SQUASH_K = 0.12
 
   const handleGazeSample = useCallback((result: GazeResult, capturedAt: number) => {
     const point = toPagePoint(result, capturedAt)
@@ -134,29 +156,88 @@ function App() {
 
   useEffect(() => {
     if (step !== 'trials' || !gazeEnabledRef.current) return
-    const id = window.setInterval(() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let frameId = 0
+    let lastConsumedPoint: PageGazePoint | null = null
+    let rawTarget: { x: number; y: number } | null = null
+
+    const animate = (now: number) => {
+      frameId = window.requestAnimationFrame(animate)
       const point = latestGazePointRef.current
       const dot = gazeDotRef.current
       if (!point || !dot) return
-      // Pull toward the target's center once gaze is within the same
-      // tolerance hit-testing uses to count it as "on the target"
-      // (hitTest.ts's HIT_TOLERANCE_PX), so it reads as "on the target"
-      // rather than drifting off it - but only a partial pull, not a hard
-      // snap, so it still moves a little with the raw signal instead of
-      // freezing dead-center for as long as gaze stays in range.
-      const targetRect = currentTargetRect()
-      const showAt =
-        targetRect && isOnTarget(point, targetRect)
-          ? {
-              x: point.x * 0.4 + (targetRect.left + targetRect.width / 2) * 0.6,
-              y: point.y * 0.4 + (targetRect.top + targetRect.height / 2) * 0.6,
-            }
-          : point
-      dot.style.transform = `translate3d(${showAt.x}px, ${showAt.y}px, 0) translate(-50%, -50%)`
+
+      // Recalculate hit-testing only when a new inference sample arrives;
+      // getBoundingClientRect on every display frame would needlessly force
+      // repeated layout reads while the target has not changed.
+      if (point !== lastConsumedPoint) {
+        const targetRect = currentTargetRect()
+        rawTarget =
+          targetRect && isOnTarget(point, targetRect)
+            ? {
+                x: point.x * 0.4 + (targetRect.left + targetRect.width / 2) * 0.6,
+                y: point.y * 0.4 + (targetRect.top + targetRect.height / 2) * 0.6,
+              }
+            : point
+        lastConsumedPoint = point
+      }
+      if (!rawTarget) return
+
+      const dt = prevTickAtRef.current ? now - prevTickAtRef.current : 0
+
+      // Speed-limited follow: step the displayed position toward rawTarget
+      // by at most DISPLAY_MAX_SPEED_PX_MS * dt this tick. First tick (or
+      // after a reduced-motion skip) just snaps once, since there's nothing
+      // to lag behind yet.
+      let showAt: { x: number; y: number }
+      const cur = displayedPosRef.current
+      if (!cur || reduceMotion || dt <= 0) {
+        showAt = rawTarget
+      } else {
+        const dx = rawTarget.x - cur.x
+        const dy = rawTarget.y - cur.y
+        const dist = Math.hypot(dx, dy)
+        const maxStep = DISPLAY_MAX_SPEED_PX_MS * dt
+        showAt = dist <= maxStep ? rawTarget : { x: cur.x + (dx / dist) * maxStep, y: cur.y + (dy / dist) * maxStep }
+      }
+      displayedPosRef.current = showAt
+
+      let normSpeed = 0
+      let angleDeg = 0
+      const prevDisplayed = prevDisplayedPosRef.current
+      if (!reduceMotion && prevDisplayed && dt > 0) {
+        const instVx = (showAt.x - prevDisplayed.x) / dt
+        const instVy = (showAt.y - prevDisplayed.y) / dt
+        const vel = smoothedVelRef.current
+        const smoothing = 1 - Math.exp(-dt / VELOCITY_SMOOTHING_MS)
+        vel.x += (instVx - vel.x) * smoothing
+        vel.y += (instVy - vel.y) * smoothing
+        const speedPxMs = Math.hypot(vel.x, vel.y)
+        normSpeed = Math.min(1, speedPxMs / DISPLAY_MAX_SPEED_PX_MS)
+        if (normSpeed < SPEED_DEADZONE) {
+          normSpeed = 0
+        } else {
+          angleDeg = Math.atan2(vel.y, vel.x) * (180 / Math.PI)
+        }
+      }
+      prevDisplayedPosRef.current = showAt
+      prevTickAtRef.current = now
+
+      dot.style.transform =
+        `translate3d(${showAt.x}px, ${showAt.y}px, 0) translate(-50%, -50%) ` +
+        `rotate(${angleDeg}deg) scaleX(${1 + normSpeed * STRETCH_K}) scaleY(${1 - normSpeed * SQUASH_K})`
       dot.style.opacity = '1'
-    }, GAZE_DOT_SNAPSHOT_MS)
-    return () => window.clearInterval(id)
-  }, [step, trialIndex])
+    }
+
+    frameId = window.requestAnimationFrame(animate)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      displayedPosRef.current = null
+      prevDisplayedPosRef.current = null
+      prevTickAtRef.current = 0
+      smoothedVelRef.current = { x: 0, y: 0 }
+    }
+  }, [step])
 
   const tracker = useGazeTracker(handleGazeSample)
 
@@ -290,22 +371,28 @@ function App() {
     return (
       <Shell>
         {gazeEnabledRef.current && (
+          // Outer div: position + velocity only (JS-written transform every
+          // animation frame, see the effect above). Inner div: the organic
+          // morph animation (gaze-blob-morph, index.css) - kept on a
+          // separate element so the two animations don't fight over the
+          // same style properties. Sized off hitTest.ts's own ~85-90px gaze
+          // error estimate scaled up per design ask ("much bigger, more
+          // modern") - still honestly reads as an uncertainty blob, not a
+          // precise cursor. Cyan, not accent's blue (#2f6fb5) - the target
+          // shape itself is bg-accent, so the gaze indicator needs a
+          // visibly different hue to stay distinguishable from what's
+          // actually being clicked.
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            // A soft blob, not a precise dot - sized off hitTest.ts's own
-            // ~85-90px gaze error estimate (h-44/w-44 = 176px diameter) so
-            // the visual honestly matches the tracker's real uncertainty
-            // instead of implying pixel precision it doesn't have. Kept
-            // short (vs. the snapshot interval above) so it settles at the
-            // new position rather than visibly trailing toward it - the
-            // blob's own softness absorbs jitter, so this no longer needs
-            // to be slow to look calm. Cyan, not accent's blue (#2f6fb5) -
-            // the target shape itself is bg-accent, so the gaze indicator
-            // needs a visibly different hue to stay distinguishable from
-            // what's actually being clicked.
-            className="pointer-events-none fixed top-0 left-0 z-50 h-44 w-44 rounded-full bg-[radial-gradient(circle,_rgb(94_211_255_/_55%)_0%,_rgb(45_170_220_/_22%)_45%,_transparent_75%)] opacity-0 blur-sm transition-[opacity,transform] duration-[220ms] ease-out"
-          />
+            // Position/stretch are written once per animation frame. Only
+            // opacity is transitioned; transitioning transform as well would
+            // restart a second interpolation on every frame and reintroduce
+            // the stutter this loop is designed to remove.
+            className="pointer-events-none fixed top-0 left-0 z-50 h-[350px] w-[350px] opacity-0 transition-opacity duration-200 ease-out will-change-transform"
+          >
+            <div className="gaze-blob-morph absolute inset-0 bg-[radial-gradient(circle,_rgb(94_211_255_/_55%)_0%,_rgb(94_211_255_/_22%)_45%,_transparent_75%)]" />
+          </div>
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
           Step {trialIndex + 1} of {TRIALS.length}

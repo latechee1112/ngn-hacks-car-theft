@@ -24,15 +24,13 @@ const MAX_CALIBRATION_POINTS = 9
 // as "gaze samples just stop arriving" with no error anywhere.
 export const GAZE_VIDEO_ID = 'distill-gaze-video'
 
-// WebcamClient drives the frame callback off requestAnimationFrame (so up to
-// display refresh rate, typically 60Hz) with no throttling of its own.
-// step() does a synchronous MediaPipe FaceLandmarker pass + a TFJS BlazeGaze
-// forward pass on the main thread every single call, for the whole
-// calibration+trials session - gaze position doesn't need to be resolved
-// faster than the eye can meaningfully move between samples, so gating to a
-// fixed interval here cuts main-thread inference load without losing
-// tracking responsiveness.
-const MIN_FRAME_INTERVAL_MS = 1000 / 24
+// WebcamClient drives the callback from requestAnimationFrame. The package's
+// advertised worker is missing from its published bundle, so MediaPipe + TFJS
+// inference runs on the UI thread. Fifteen samples per second is responsive
+// enough for gaze calibration while leaving regular frames for React, CSS and
+// input. The in-flight guard in start() is equally important: without it a
+// slow inference can overlap the next one and saturate the page completely.
+const MIN_FRAME_INTERVAL_MS = 1000 / 15
 
 // How many recent open-eye frames registerCalibrationPoint feeds to a
 // single dot's fit. handleClick() (the library's own entry point) only ever
@@ -43,10 +41,10 @@ const MIN_FRAME_INTERVAL_MS = 1000 / 24
 // of samples for one label, which both the closed-form affine fit and the
 // gradient step use directly - more, consistent samples per dot materially
 // improves calibration accuracy over a single frame. At MIN_FRAME_INTERVAL_MS
-// (~24Hz) this is roughly the last 1000ms of fixation on the dot - sized to
+// (~15Hz) this is roughly the last 800ms of fixation on the dot - sized to
 // use nearly the whole CALIBRATION_DOT_INTERVAL_MS dwell instead of only its
 // tail.
-const CALIBRATION_SAMPLE_BUFFER_SIZE = 24
+const CALIBRATION_SAMPLE_BUFFER_SIZE = 12
 
 // Rejects samples whose headVector is far from the buffer's own median -
 // catches a stray head-turn or landmark glitch mid-dwell without needing a
@@ -111,26 +109,35 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
       const webcam = new WebcamClient(videoElementId)
       webcamRef.current = webcam
       let lastProcessedAt = 0
+      let inferenceInFlight = false
       await webcam.startWebcam(async (frame, timestamp) => {
-        if (!activeRef.current || !trackerRef.current) return
+        if (!activeRef.current || !trackerRef.current || inferenceInFlight) return
         const now = performance.now()
         if (now - lastProcessedAt < MIN_FRAME_INTERVAL_MS) return
         lastProcessedAt = now
-        const result = await trackerRef.current.step(frame, timestamp)
-        if (result.gazeState === 'open') {
-          recentSamplesRef.current.push({
-            eyePatch: result.eyePatch,
-            headVector: result.headVector,
-            faceOrigin3D: result.faceOrigin3D,
-          })
-          if (recentSamplesRef.current.length > CALIBRATION_SAMPLE_BUFFER_SIZE) {
-            recentSamplesRef.current.shift()
+        inferenceInFlight = true
+        try {
+          const result = await trackerRef.current.step(frame, timestamp)
+          // stop() may have been called while inference was yielding to the
+          // GPU/WASM backend. Do not publish a late sample into the next step.
+          if (!activeRef.current || !trackerRef.current) return
+          if (result.gazeState === 'open') {
+            recentSamplesRef.current.push({
+              eyePatch: result.eyePatch,
+              headVector: result.headVector,
+              faceOrigin3D: result.faceOrigin3D,
+            })
+            if (recentSamplesRef.current.length > CALIBRATION_SAMPLE_BUFFER_SIZE) {
+              recentSamplesRef.current.shift()
+            }
           }
+          // performance.now() at callback time, not GazeResult.timestamp
+          // (which is relative to video start, a different clock than the
+          // trial start/end markers this later gets compared against).
+          onSample(result, performance.now())
+        } finally {
+          inferenceInFlight = false
         }
-        // performance.now() at callback time, not GazeResult.timestamp
-        // (which is relative to video start, a different clock than the
-        // trial start/end markers this later gets compared against).
-        onSample(result, performance.now())
       })
       setReady(true)
     },

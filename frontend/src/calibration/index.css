@@ -58,6 +58,7 @@ body {
   background: radial-gradient(circle, rgb(59 130 246 / 9%) 0%, rgb(17 17 17 / 0%) 72%);
   pointer-events: none;
   z-index: 0;
+  will-change: transform;
 }
 
 .bg-glow-top {
@@ -97,6 +98,39 @@ body {
   .bg-glow {
     animation: none;
   }
+
+  .gaze-blob-morph {
+    animation: none;
+  }
+}
+
+/* Continuous organic wobble for the live gaze indicator. The irregular
+   outline stays intact while compositor-only transform keyframes breathe
+   and turn it. Animating border-radius on a 350px blurred element forced a
+   large repaint every frame; this keeps the same living-blob character
+   without competing with gaze inference on the main thread. */
+@keyframes gaze-blob-morph {
+  0% {
+    transform: rotate(0deg) scale(1, 0.97);
+  }
+  25% {
+    transform: rotate(5deg) scale(0.96, 1.03);
+  }
+  50% {
+    transform: rotate(-3deg) scale(1.04, 0.96);
+  }
+  75% {
+    transform: rotate(4deg) scale(0.98, 1.04);
+  }
+  100% {
+    transform: rotate(0deg) scale(1, 0.97);
+  }
+}
+
+.gaze-blob-morph {
+  border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+  animation: gaze-blob-morph 11s ease-in-out infinite;
+  will-change: transform;
 }
 
 /* Gentle drift for the "motion" trial's distractor shapes. */
