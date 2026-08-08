@@ -19,6 +19,7 @@ function App() {
   const [progressiveRevealAvailable, setProgressiveRevealAvailable] = useState(false)
   const [progressiveRevealActive, setProgressiveRevealActive] = useState(false)
   const [error, setError] = useState<string>('')
+  const [analyzing, setAnalyzing] = useState(false)
 
   async function refreshStatus() {
     try {
@@ -51,6 +52,7 @@ function App() {
 
   async function simplifyPage() {
     setError('')
+    setAnalyzing(true)
     try {
       const tabId = await getActiveTabId()
       if (!tabId) {
@@ -65,6 +67,8 @@ function App() {
       setProgressiveRevealAvailable(response.primaryFound)
     } catch (err) {
       setError(`Couldn't simplify this page: ${String(err)}`)
+    } finally {
+      setAnalyzing(false)
     }
   }
 
@@ -150,10 +154,25 @@ function App() {
           <button
             type="button"
             onClick={simplified ? restorePage : simplifyPage}
-            className={`flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-body font-medium text-accent-fg transition-colors hover:bg-accent-hover ${FOCUS_RING}`}
+            disabled={analyzing}
+            aria-busy={analyzing}
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium transition-colors ${FOCUS_RING} ${
+              analyzing
+                ? 'cursor-wait border border-outline bg-surface text-on-surface-variant'
+                : 'bg-accent text-accent-fg hover:bg-accent-hover'
+            }`}
           >
-            <Icon name={simplified ? 'restore' : 'layers'} />
-            {simplified ? 'Show Original Page' : 'Simplify Current Page'}
+            {analyzing ? (
+              <>
+                <Icon name="spinner" className="animate-spin text-accent-text" />
+                Simplifying…
+              </>
+            ) : (
+              <>
+                <Icon name={simplified ? 'restore' : 'layers'} />
+                {simplified ? 'Show Original Page' : 'Simplify Current Page'}
+              </>
+            )}
           </button>
           <button
             type="button"

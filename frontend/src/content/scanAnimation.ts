@@ -1,5 +1,6 @@
-// Decorative scan sweep played when the user presses Activate. Purely a visual
-// overlay: it never gates, delays, or observes the simplification pipeline.
+// Decorative scan sweep played while the backend analysis call is in flight.
+// Purely a visual overlay: it never gates, delays, or observes the
+// simplification pipeline.
 //
 // Detection-safety is the whole design constraint here. extractPage() runs
 // synchronously at the start of handleSimplify(), so this element is in the DOM
@@ -24,9 +25,28 @@
 const SCAN_HOST_TAG = 'distill-scan'
 const SCAN_HOST_ID = 'distill-scan-layer'
 
-const SWEEP_MS = 560
-const TOTAL_MS = 900
-const REDUCED_MS = 320
+// Three phases: INTRO plays once (grid wipes in, first beam pass). LOOP
+// repeats indefinitely after that — for as long as the backend call is in
+// flight, however long that turns out to be. OUTRO plays once stop() is
+// called. MIN_VISIBLE_MS floors how soon stop() may start the outro, so a
+// very fast response (cache hit, local fallback) can't cut the intro off
+// mid-wipe.
+const INTRO_MS = 560
+const LOOP_MS = 900
+const OUTRO_MS = 320
+const MIN_VISIBLE_MS = INTRO_MS + 60
+
+const REDUCED_INTRO_MS = 220
+const REDUCED_LOOP_MS = 1100
+const REDUCED_OUTRO_MS = 220
+const REDUCED_MIN_VISIBLE_MS = REDUCED_INTRO_MS + 40
+
+// Safety net, not the normal path: if stop() is somehow never called (e.g.
+// the tab navigates away mid-request in a way that drops the response), this
+// force-removes the layer well after the backend's own LLM_TIMEOUT_SECONDS
+// (8s) would have given up, so it never fires for a genuinely slow-but-alive
+// call.
+const SAFETY_MAX_MS = 20000
 
 // Two-tier mesh: fine cells inside heavier major cells. Reads as a denser,
 // more deliberate scan than a single grid at the same line weight would.
@@ -49,12 +69,10 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
-function styleText(reduced: boolean): string {
-  const gridAnimation = reduced
-    ? 'none'
-    : `distill-scan-resolve ${SWEEP_MS}ms cubic-bezier(0.4, 0, 0.2, 1) forwards`
-
-  return `
+// State toggled via classes rather than baking a duration into the CSS text,
+// so the same stylesheet serves the whole intro -> loop -> outro sequence —
+// JS only ever adds/removes 'looping' and 'outro', never regenerates this.
+const STYLE = `
 :host {
   /* No box, no position — see the note at the top of this file. */
   display: contents;
@@ -64,10 +82,16 @@ function styleText(reduced: boolean): string {
   inset: 0;
   z-index: 2147483646;
   /* Never intercept a click. A full-viewport layer that swallowed a tap on a
-     consent banner for 600ms would be a real problem, not a cosmetic one. */
+     consent banner would be a real problem, not a cosmetic one. */
   pointer-events: none;
   contain: strict;
-  animation: ${reduced ? `distill-scan-fade-quiet ${REDUCED_MS}ms` : `distill-scan-fade ${TOTAL_MS}ms`} linear forwards;
+  opacity: 1;
+}
+.root.outro {
+  animation: distill-scan-fade-out ${OUTRO_MS}ms linear forwards;
+}
+.root.reduced.outro {
+  animation-duration: ${REDUCED_OUTRO_MS}ms;
 }
 .grid {
   position: absolute;
@@ -85,7 +109,7 @@ function styleText(reduced: boolean): string {
     ${GRID_MINOR}px ${GRID_MINOR}px,
     ${GRID_MINOR}px ${GRID_MINOR}px;
   clip-path: inset(0 0 100% 0);
-  animation: ${gridAnimation};
+  animation: distill-scan-resolve ${INTRO_MS}ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 .beam {
   position: absolute;
@@ -96,7 +120,7 @@ function styleText(reduced: boolean): string {
   background: ${BEAM};
   box-shadow: 0 0 18px 3px ${BEAM_GLOW}, 0 0 44px 12px ${BEAM_BLOOM};
   transform: translateY(-3px);
-  animation: distill-scan-sweep ${SWEEP_MS}ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: distill-scan-sweep ${INTRO_MS}ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 /* Body trailing the leading edge, over the region already resolved. */
 .beam::before {
@@ -108,9 +132,23 @@ function styleText(reduced: boolean): string {
   height: ${TRAIL_HEIGHT}px;
   background: linear-gradient(to top, ${TRAIL}, transparent);
 }
+/* After the intro finishes, JS adds .looping — swaps the beam to an
+   indefinitely repeating pass so it keeps signaling work while the request
+   is still in flight. */
+.root.looping .beam {
+  animation: distill-scan-sweep-loop ${LOOP_MS}ms linear infinite;
+}
+/* prefers-reduced-motion: no positional movement. The grid fades in once and
+   then breathes gently in place — no beam element at all. */
+.root.reduced .grid {
+  clip-path: inset(0 0 0% 0);
+  opacity: 0;
+  animation: distill-scan-breathe-in ${REDUCED_INTRO_MS}ms ease-out forwards;
+}
+.root.reduced.looping .grid {
+  animation: distill-scan-breathe ${REDUCED_LOOP_MS}ms ease-in-out infinite;
+}
 
-/* Same duration and easing as .beam, so the leading edge of the grid and the
-   beam stay locked together for the whole sweep. */
 @keyframes distill-scan-resolve {
   from { clip-path: inset(0 0 100% 0); }
   to   { clip-path: inset(0 0 0% 0); }
@@ -120,35 +158,51 @@ function styleText(reduced: boolean): string {
   85%  { opacity: 1; }
   to   { transform: translateY(100vh); opacity: 0; }
 }
-@keyframes distill-scan-fade {
-  0%, 70% { opacity: 1; }
-  100%    { opacity: 0; }
+@keyframes distill-scan-sweep-loop {
+  0%   { transform: translateY(-3px); opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
 }
-@keyframes distill-scan-fade-quiet {
-  0%   { opacity: 0; }
-  40%  { opacity: 1; }
-  100% { opacity: 0; }
+@keyframes distill-scan-breathe-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes distill-scan-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+@keyframes distill-scan-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 `
-}
 
 function removeScanLayer(): void {
   document.getElementById(SCAN_HOST_ID)?.remove()
 }
 
 /**
- * Plays the scan sweep once. Safe to call repeatedly — an in-flight sweep is
- * torn down and restarted so one Activate press yields exactly one animation.
+ * Starts the scan sweep and returns a `stop` function. The sweep plays its
+ * intro once, then loops indefinitely — call `stop()` when the backend
+ * response (or fallback) is ready, and it plays a short outro fade before
+ * removing itself. Safe to call repeatedly; an in-flight sweep is torn down
+ * and restarted so one Activate press yields exactly one animation.
  *
- * Returns immediately. Callers must not await it or sequence work behind it.
+ * Both starting and stopping return immediately. Callers must not await
+ * `startScanAnimation()` or let it sequence work — it is decoration running
+ * alongside the real analysis call, never in front of it.
  */
-export function playScanAnimation(): void {
-  if (!document.body) return
+export function startScanAnimation(): () => void {
+  if (!document.body) return () => {}
 
   // Restart rather than stack, so a double-press can't leave two layers running.
   removeScanLayer()
 
   const reduced = prefersReducedMotion()
+  const introMs = reduced ? REDUCED_INTRO_MS : INTRO_MS
+  const outroMs = reduced ? REDUCED_OUTRO_MS : OUTRO_MS
+  const minVisibleMs = reduced ? REDUCED_MIN_VISIBLE_MS : MIN_VISIBLE_MS
+
   const host = document.createElement(SCAN_HOST_TAG)
   host.id = SCAN_HOST_ID
   host.setAttribute('aria-hidden', 'true')
@@ -156,10 +210,10 @@ export function playScanAnimation(): void {
   const shadow = host.attachShadow({ mode: 'closed' })
 
   const style = document.createElement('style')
-  style.textContent = styleText(reduced)
+  style.textContent = STYLE
 
   const root = document.createElement('div')
-  root.className = 'root'
+  root.className = reduced ? 'root reduced' : 'root'
 
   const grid = document.createElement('div')
   grid.className = 'grid'
@@ -174,14 +228,38 @@ export function playScanAnimation(): void {
   shadow.append(style, root)
   document.body.appendChild(host)
 
-  // animationend is the normal path; the timer is the guarantee. Background
-  // tabs throttle animation frames, and a stuck decorative layer would sit on
-  // the page forever.
-  const duration = reduced ? REDUCED_MS : TOTAL_MS
-  const timer = window.setTimeout(removeScanLayer, duration + 150)
-  root.addEventListener('animationend', (event) => {
-    if (event.target !== root) return
-    window.clearTimeout(timer)
-    removeScanLayer()
-  })
+  const startedAt = performance.now()
+  let removed = false
+
+  function finish(): void {
+    if (removed) return
+    removed = true
+    window.clearTimeout(introTimer)
+    window.clearTimeout(safetyTimer)
+    root.classList.remove('looping')
+    root.classList.add('outro')
+    window.setTimeout(removeScanLayer, outroMs + 100)
+  }
+
+  // Enter the loop once the intro's own animation has actually finished
+  // playing — not tied to stop(), so the loop starts even if the caller
+  // takes a while to stop() it.
+  const introTimer = window.setTimeout(() => {
+    if (!removed) root.classList.add('looping')
+  }, introMs)
+
+  const safetyTimer = window.setTimeout(finish, SAFETY_MAX_MS)
+
+  let stopped = false
+  return function stop(): void {
+    if (stopped) return
+    stopped = true
+    const elapsed = performance.now() - startedAt
+    const remaining = minVisibleMs - elapsed
+    if (remaining > 0) {
+      window.setTimeout(finish, remaining)
+    } else {
+      finish()
+    }
+  }
 }
