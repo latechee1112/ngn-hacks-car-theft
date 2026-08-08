@@ -18,7 +18,7 @@ import {
   isReduceMotionOn,
   isSimplificationActive,
   isSpacingIncreased,
-  prefilterAds,
+  prefilterPage,
   restoreOriginalPage,
   setBlurIntensity,
   setIncreaseSpacing,
@@ -89,8 +89,10 @@ function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendR
 // (no LLM, no task-awareness) is only a fallback for when the backend is unreachable.
 // Stage 1 stands on its own either way — if the backend is down, the ads still go.
 async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResult> {
-  const prefiltered = prefilterAds()
-  console.log(`[Distill] pre-filter hid ${prefiltered} ad/sponsored block(s) before analysis`)
+  const prefiltered = prefilterPage()
+  console.log(
+    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s) and blurred ${prefiltered.deemphasized} secondary region(s) before analysis`,
+  )
 
   const result = await requestBackendAnalysis(profileFor(settings))
 

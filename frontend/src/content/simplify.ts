@@ -17,6 +17,7 @@ const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
 const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
+const READING_COLUMN_CLASS = 'distill-reading-column'
 const DEEMPHASIZE_CLASS = 'distill-deemphasize'
 const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
 const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
@@ -58,6 +59,29 @@ function findPrimaryContent(): Element | null {
     }
   })
   return best
+}
+
+// A reading column only helps actual reading. Prose is text-dense with few links per
+// character; a feed or results grid is the opposite — thousands of characters that are
+// almost all link text, spread across cards. Narrowing the latter to 760px is what
+// squeezes a YouTube home page into a strip.
+const PROSE_MIN_TEXT = 600
+const PROSE_MIN_PARAGRAPHS = 3
+const PROSE_MIN_CHARS_PER_LINK = 60
+
+function isProseLike(el: Element): boolean {
+  const text = ((el as HTMLElement).innerText || '').length
+  if (text < PROSE_MIN_TEXT) return false
+  if (el.querySelectorAll('p').length < PROSE_MIN_PARAGRAPHS) return false
+  const links = el.querySelectorAll('a[href]').length
+  return text / Math.max(links, 1) >= PROSE_MIN_CHARS_PER_LINK
+}
+
+// Marks an element as the primary region, and gives it the reading column only if it
+// actually reads like an article.
+function markPrimary(el: Element): void {
+  el.classList.add(PRIMARY_CLASS)
+  if (isProseLike(el)) el.classList.add(READING_COLUMN_CLASS)
 }
 
 // Prevents nested targets (e.g. an ad div inside an aside) from having opacity applied
@@ -169,17 +193,117 @@ function collectAdTargets(primary: Element | null): Element[] {
   return pruneNested(Array.from(targets))
 }
 
+// --- Obvious secondary content -------------------------------------------
+// Blurred locally in the same pre-filter pass as ads, for the same reason: a right
+// rail of "Top Stories", a nav, a footer, a related-articles module is secondary on
+// essentially every page, and waiting for the backend to say so leaves it sharp and
+// competing with the article. The backend can still overrule any of it — see the
+// emphasize/keep cases in applyBackendActions().
+
+const SECONDARY_SELECTOR =
+  'nav, aside, footer, [role="navigation"], [role="complementary"], [role="contentinfo"], ' +
+  '[class*="sidebar" i], [id*="sidebar" i], [class*="rail" i], [id*="rail" i], ' +
+  '[class*="related" i], [class*="recommend" i], [class*="trending" i], [class*="popular" i], ' +
+  '[class*="most-read" i], [class*="top-stories" i], [class*="more-from" i], ' +
+  '[class*="newsletter" i], [class*="subscribe" i], [class*="social" i], [class*="share" i], ' +
+  '[class*="widget" i], [class*="promo" i]'
+
+// A sidebar is often named nothing useful at all (AccuWeather's is "page-column-2"),
+// so shape is the more reliable signal: a column sitting beside a much wider,
+// much text-heavier sibling, carrying a handful of links. That is a rail, whatever
+// it calls itself.
+const SIDEBAR_MAX_WIDTH_RATIO = 0.6
+const SIDEBAR_MAX_TEXT_RATIO = 0.5
+const SIDEBAR_MIN_LINKS = 3
+// Bounds the rect reads on very large documents. Generous — a deep page settles well
+// under this — but keeps the pass from ever becoming the slow part of simplification.
+const COLUMN_SCAN_BUDGET = 4000
+
+function isSideBySide(a: DOMRect, b: DOMRect): boolean {
+  const verticalOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+  const horizontalOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+  return verticalOverlap > Math.min(a.height, b.height) * 0.5 && horizontalOverlap <= 4
+}
+
+function collectSidebarColumns(): Element[] {
+  const found: Element[] = []
+  const queue: Element[] = [document.body]
+  let budget = COLUMN_SCAN_BUDGET
+
+  while (queue.length && budget > 0) {
+    const node = queue.shift() as Element
+    const children = Array.from(node.children).filter(isVisible)
+    budget -= children.length
+
+    if (children.length >= 2 && children.length <= 4) {
+      const rects = children.map((c) => c.getBoundingClientRect())
+      const texts = children.map((c) => ((c as HTMLElement).innerText || '').length)
+      const mainIndex = texts.indexOf(Math.max(...texts))
+      children.forEach((child, i) => {
+        if (i === mainIndex) return
+        if (!isSideBySide(rects[mainIndex], rects[i])) return
+        if (rects[i].width > rects[mainIndex].width * SIDEBAR_MAX_WIDTH_RATIO) return
+        if (texts[i] > texts[mainIndex] * SIDEBAR_MAX_TEXT_RATIO) return
+        if (child.querySelectorAll('a[href]').length < SIDEBAR_MIN_LINKS) return
+        found.push(child)
+      })
+    }
+
+    children.forEach((c) => queue.push(c))
+  }
+
+  return found
+}
+
+function collectSecondaryTargets(primary: Element | null): Element[] {
+  const targets = new Set<Element>()
+
+  const consider = (el: Element) => {
+    if (!isVisible(el)) return
+    if (isProtectedFromSimplification(el)) return
+    // Never blur the article itself, or anything wrapping it.
+    if (primary && (el === primary || el.contains(primary) || primary.contains(el))) return
+    if (el === document.body || el === document.documentElement) return
+    if (el.closest(`.${AD_HIDDEN_CLASS}`)) return
+    targets.add(el)
+  }
+
+  document.querySelectorAll(SECONDARY_SELECTOR).forEach(consider)
+  collectSidebarColumns().forEach(consider)
+
+  return pruneNested(Array.from(targets))
+}
+
+function deemphasizeSecondary(primary: Element | null): number {
+  const targets = collectSecondaryTargets(primary)
+  targets.forEach((el) => {
+    saveOriginal(el)
+    el.classList.add(DEEMPHASIZE_CLASS)
+    unstick(el)
+  })
+  return targets.length
+}
+
 // Stage 1 of simplification, run by content.ts BEFORE the page is extracted and sent
 // to the backend. Everything unambiguous — "Promoted"/"Sponsored" badges, ad-network
 // frames, ad-named containers — is resolved locally and instantly: the user sees the
 // clutter go immediately instead of waiting on a network round-trip, and extractPage()
 // then skips these blocks, so the backend only spends its judgement on the genuinely
 // ambiguous rest of the page.
-export function prefilterAds(): number {
+export interface PrefilterResult {
+  adsHidden: number
+  deemphasized: number
+}
+
+export function prefilterPage(): PrefilterResult {
   injectGlobalStyle()
-  const count = hideAds(getPrimaryElement())
+  // Nothing is marked primary yet (the backend hasn't answered), so the local
+  // article detector supplies the "don't touch this" region for both passes.
+  const primary = findPrimaryContent()
+  const adsHidden = hideAds(primary)
+  const deemphasized = deemphasizeSecondary(primary)
   startAdObserver()
-  return count
+  return { adsHidden, deemphasized }
 }
 
 function hideAds(primary: Element | null): number {
@@ -242,7 +366,11 @@ function injectGlobalStyle(): void {
 html[${SIMPLIFIED_ATTR}] body {
   line-height: 1.7 !important;
 }
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} {
+/* The narrow reading column is applied via its own class, NOT to every primary
+   region: on a card grid (a YouTube feed, a search results page) forcing 760px
+   and a larger font squeezes the grid into a narrow strip in the middle of an
+   otherwise empty page. isProseLike() decides who gets this. */
+html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} {
   max-width: 760px !important;
   margin-left: auto !important;
   margin-right: auto !important;
@@ -250,33 +378,37 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} {
   line-height: 1.75 !important;
   float: none !important;
 }
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} p,
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} li {
+html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} p,
+html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} li {
   /* em, relative to the container's already-scaled font-size above - not an
      independent multiply, or textScale would compound quadratically. */
   margin-bottom: calc(1.1em * var(--distill-spacing, 1)) !important;
   font-size: 1.05em !important;
 }
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} h1,
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} h2,
-html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} h3 {
+html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h1,
+html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h2,
+html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h3 {
   margin-top: 1.4em !important;
   margin-bottom: 0.6em !important;
 }
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} {
+/* Like the ad rule, deliberately not gated on [${SIMPLIFIED_ATTR}]: the local
+   pre-filter blurs obvious secondary content before the backend answers, which is
+   before that attribute is set. The classes are only ever added by us and are
+   cleared on restore, so the gate bought nothing. */
+.${DEEMPHASIZE_CLASS} {
   opacity: 0.4 !important;
   filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
   transition: opacity 0.2s ease, filter 0.2s ease !important;
 }
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS}:hover {
+.${DEEMPHASIZE_CLASS}:hover {
   opacity: 0.85 !important;
   filter: grayscale(60%) !important;
 }
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} input,
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} button,
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} select,
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} textarea,
-html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
+.${DEEMPHASIZE_CLASS} input,
+.${DEEMPHASIZE_CLASS} button,
+.${DEEMPHASIZE_CLASS} select,
+.${DEEMPHASIZE_CLASS} textarea,
+.${DEEMPHASIZE_CLASS} a[href] {
   opacity: 1 !important;
   filter: none !important;
 }
@@ -286,11 +418,11 @@ html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
    absolute/relative stop the element from following the scroll while it keeps the
    exact box it already had: fixed elements stay out of flow, sticky ones keep the
    space flow already reserved for them. */
-html[${SIMPLIFIED_ATTR}] .${UNSTICK_FIXED_CLASS} {
+.${UNSTICK_FIXED_CLASS} {
   position: absolute !important;
   max-width: 100% !important;
 }
-html[${SIMPLIFIED_ATTR}] .${UNSTICK_STICKY_CLASS} {
+.${UNSTICK_STICKY_CLASS} {
   position: relative !important;
   top: auto !important;
   bottom: auto !important;
@@ -418,7 +550,7 @@ export function applySimplification(): SimplifyResult {
 
   if (primary) {
     saveOriginal(primary)
-    primary.classList.add(PRIMARY_CLASS)
+    markPrimary(primary)
   }
 
   const targets = collectNoiseTargets(primary)
@@ -466,8 +598,12 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
     saveOriginal(el)
 
     switch (action.action) {
+      // emphasize/keep also clear any blur the local pre-filter put on this block:
+      // the pre-filter guesses from shape alone, the backend actually read the page,
+      // so where they disagree the backend wins.
       case 'emphasize':
-        el.classList.add(PRIMARY_CLASS)
+        el.classList.remove(DEEMPHASIZE_CLASS)
+        markPrimary(el)
         primaryFound = true
         break
       case 'deemphasize':
@@ -481,6 +617,8 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
         el.classList.add(SECTION_HIDDEN_CLASS)
         break
       case 'keep':
+        el.classList.remove(DEEMPHASIZE_CLASS)
+        break
       default:
         break
     }
