@@ -349,6 +349,56 @@ export function setReduceColorVariation(enabled: boolean): boolean {
   return true
 }
 
+// --- Live layout preferences ----------------------------------------------
+// Reduce motion and increased spacing are user toggles, not analysis results.
+// Both are pure CSS switches on <html> (the rules already exist in
+// injectGlobalStyle), so they apply instantly to an already-simplified page and
+// need no snapshot — restoreOriginalPage() already clears both.
+//
+// These deliberately win over the backend's suggested `layout` block: an
+// explicit toggle is stronger intent than a profile-derived default.
+
+// Matches DEFAULT_PROFILE.spacingMultiplier. The backend's VisualProfile
+// constrains spacingMultiplier to 1.0–3.0, so "off" is 1, never 0.
+export const INCREASED_SPACING_MULTIPLIER = 1.4
+const BASE_SPACING_MULTIPLIER = 1
+
+export interface LayoutPreferences {
+  reduceMotion: boolean
+  increaseSpacing: boolean
+}
+
+export function isReduceMotionOn(): boolean {
+  return document.documentElement.hasAttribute(REDUCE_MOTION_ATTR)
+}
+
+// Returns false when there is no simplified page to apply to — the caller keeps
+// the preference stored and it takes effect on the next simplify.
+export function setReduceMotion(enabled: boolean): boolean {
+  if (!isSimplificationActive()) return false
+  document.documentElement.toggleAttribute(REDUCE_MOTION_ATTR, enabled)
+  return true
+}
+
+export function isSpacingIncreased(): boolean {
+  const raw = document.documentElement.style.getPropertyValue('--distill-spacing')
+  return Number.parseFloat(raw) > BASE_SPACING_MULTIPLIER
+}
+
+export function setIncreaseSpacing(enabled: boolean): boolean {
+  if (!isSimplificationActive()) return false
+  document.documentElement.style.setProperty(
+    '--distill-spacing',
+    String(enabled ? INCREASED_SPACING_MULTIPLIER : BASE_SPACING_MULTIPLIER),
+  )
+  return true
+}
+
+export function applyLayoutPreferences(prefs: LayoutPreferences): void {
+  setReduceMotion(prefs.reduceMotion)
+  setIncreaseSpacing(prefs.increaseSpacing)
+}
+
 // --- Progressive reveal ---------------------------------------------------
 
 export interface ProgressiveRevealResult {

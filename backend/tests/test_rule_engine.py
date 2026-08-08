@@ -83,3 +83,27 @@ def test_rule_engine_fallback_produces_action_for_every_block():
     actions = rule_engine.fallback_actions(blocks, profile)
     assert len(actions) == 5
     assert {a.block_id for a in actions} == {b.block_id for b in blocks}
+
+
+def test_reason_varies_by_seed_but_is_stable_per_seed():
+    """Same block always reads the same; different blocks of one category
+    don't all read identically. crc32 (not hash()) keeps it stable across runs."""
+    category = ClassificationLabel.DISTRACTING
+
+    assert rule_engine.reason_for_category(category, "ff-1") == rule_engine.reason_for_category(category, "ff-1")
+
+    seen = {rule_engine.reason_for_category(category, f"ff-{i}") for i in range(30)}
+    assert len(seen) > 1
+
+    valid = set(rule_engine._REASONS_BY_CATEGORY[category])
+    assert seen <= valid
+
+
+def test_reason_without_seed_is_deterministic_first_variant():
+    for category in ClassificationLabel:
+        assert rule_engine.reason_for_category(category) == rule_engine._REASONS_BY_CATEGORY[category][0]
+
+
+def test_every_category_has_multiple_phrasings():
+    for category in ClassificationLabel:
+        assert len(rule_engine._REASONS_BY_CATEGORY[category]) >= 2

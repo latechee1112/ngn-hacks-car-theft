@@ -25,20 +25,24 @@ FocusFit. You will be given a JSON list of sanitized webpage block descriptions 
 classify each block's relevance to the user's stated task.
 
 Rules you MUST follow:
-- Respond with JSON only: {"classifications": [{"blockId": "...", "label": "...", "reason": "..."}]}
+- Respond with JSON only: {"classifications": [{"blockId": "...", "label": "..."}]}
+- Emit exactly these two keys per entry. Do not add a reason, explanation, or any other field.
 - Use only block IDs that appear in the input. Never invent an ID.
 - "label" must be exactly one of: Essential, Supporting, Distracting, Safety-critical, Uncertain.
 - Never output HTML, JavaScript, CSS, or any executable code.
-- Never rewrite or repeat webpage content beyond a short "reason" (<=15 words).
-- If a block is a password field, payment field, consent control, or warning/validation \
-message, you MUST label it Safety-critical.
-- If a block is a required form instruction, prefer Supporting or Safety-critical, never Distracting.
+- Never rewrite or repeat webpage content.
+- If a block's text or role suggests a password/payment field, a consent or cookie control, \
+or a warning/validation message, you MUST label it Safety-critical.
 - If pageHasSensitiveForms is true, be extra conservative with form/input blocks - prefer \
 Safety-critical or Supporting over Distracting for them.
 - When unsure about a block's relevance, use Uncertain rather than guessing - this is an \
 accessibility aid, not a diagnostic tool, so err conservative.
 - Do not include more than one entry per block ID.
 """
+
+# Hard cap on the text sent per block. The classifier only needs enough to
+# recognize what a block is, not to read it.
+_TEXT_PREVIEW_MAX = 100
 
 
 class LLMClassificationError(Exception):
@@ -50,17 +54,50 @@ class LLMClassificationError(Exception):
 
 
 class RawClassification(BaseModel):
-    model_config = {"extra": "forbid"}
+    # "ignore", not "forbid": the prompt no longer asks for a reason, but a
+    # chatty model that emits one anyway must not invalidate the whole
+    # response and dump the page onto the rule-engine fallback. Unknown keys
+    # are dropped; only blockId and label are ever read.
+    model_config = {"extra": "ignore"}
 
     blockId: str
     label: str
-    reason: Optional[str] = ""
 
 
 class RawClassificationResponse(BaseModel):
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
     classifications: List[RawClassification]
+
+
+def _project_for_llm(block: PageBlock) -> dict:
+    """Request-time projection of a PageBlock down to classification signal only.
+
+    Deliberately not a change to PageBlock itself - the full model is still
+    what the rule engine, validation, and action-building all see. This is
+    only the shape that crosses the wire to the LLM.
+
+    Safety flags are excluded on purpose: they are never LLM-decided.
+    validation.validate_and_build_actions() re-derives Safety-critical from
+    block.is_safety_critical() and overrides whatever label came back, so
+    sending them would only spend tokens on a decision already made here.
+    """
+    projected = {
+        "blockId": block.block_id,  # structural - the response is keyed on it
+        "tag": block.tag,
+        "role": block.role,
+        "elementType": block.landmark,
+        "isInteractive": block.is_interactive,
+        "textPreview": block.text[:_TEXT_PREVIEW_MAX],
+    }
+    if block.bounding_box is not None:
+        # Coarse placement only - 2dp of viewport fraction is enough to tell
+        # "top strip" from "main column" without shipping four full floats.
+        projected["roughPosition"] = {
+            "x": round(block.bounding_box.x, 2),
+            "y": round(block.bounding_box.y, 2),
+        }
+    return projected
 
 
 def _build_user_payload(
@@ -69,20 +106,7 @@ def _build_user_payload(
     task: Optional[str],
     has_sensitive_forms: bool,
 ) -> str:
-    sanitized = [
-        {
-            "blockId": b.block_id,
-            "tag": b.tag,
-            "landmark": b.landmark,
-            "role": b.role,
-            "text": b.text,
-            "isInteractive": b.is_interactive,
-            "isFormControl": b.is_form_control,
-            "isFormInstruction": b.is_form_instruction,
-            "isSafetyCritical": b.is_safety_critical(),
-        }
-        for b in blocks
-    ]
+    sanitized = [_project_for_llm(b) for b in blocks]
     payload = {
         "task": task or "General browsing - reduce visual clutter.",
         "simplificationStrength": profile.simplification_strength,
