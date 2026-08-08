@@ -29,6 +29,11 @@ export interface SiteRule {
   // Everything matching these is blurred. Missing selectors are simply skipped, so
   // a Devpost markup change degrades to "blurs less", never to a broken page.
   blurSelectors: string[]
+  // Suppresses the 760px reading column and the text upscale. Set it for any page
+  // whose main region is a real multi-column layout rather than an article: forcing
+  // the column squeezes the whole page into a strip and wraps the rail one word per
+  // line. On a hand-tuned page the blur is the whole intended change.
+  disableReadingColumn?: boolean
 }
 
 // --- Devpost project pages -------------------------------------------------
@@ -57,6 +62,9 @@ const DEVPOST_PROJECT: SiteRule = {
     // Bottom bar: Like button, "N people like this", liker avatars.
     '#share-and-like',
   ],
+  // The story and the "Submitted to"/"Created by" rail are siblings inside one grid;
+  // isProseLike() sees enough prose to claim the whole thing and narrows it.
+  disableReadingColumn: true,
 }
 
 const SITE_RULES: SiteRule[] = [DEVPOST_PROJECT]

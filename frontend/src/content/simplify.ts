@@ -12,7 +12,7 @@ import {
 } from './dom-heuristics'
 import { FF_ID_ATTR } from './extract'
 import { pruneDetachedOriginals, restoreAllOriginal, saveOriginal } from './originalState'
-import { applySiteRules, HARD_BLUR_CLASS } from './siteRules'
+import { applySiteRules, findSiteRule, HARD_BLUR_CLASS } from './siteRules'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
 const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
@@ -79,9 +79,12 @@ function isProseLike(el: Element): boolean {
 }
 
 // Marks an element as the primary region, and gives it the reading column only if it
-// actually reads like an article.
+// actually reads like an article — and only if the page's site rule (if any) hasn't
+// opted out, which is how a hand-tuned page keeps its own layout and gets nothing but
+// the blur it asked for.
 function markPrimary(el: Element): void {
   el.classList.add(PRIMARY_CLASS)
+  if (findSiteRule()?.disableReadingColumn) return
   if (isProseLike(el)) el.classList.add(READING_COLUMN_CLASS)
 }
 
@@ -640,6 +643,10 @@ export function applySimplification(): SimplifyResult {
 
   pauseAutoplayMedia()
   injectGlobalStyle()
+  // Re-asserted after the backend's actions (and after the local heuristic), so a
+  // 'keep'/'emphasize' on a block that overlaps a hand-tuned region can't un-blur it:
+  // a hardcoded rule is a deliberate choice and outranks any inference. Idempotent.
+  applySiteRules()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
   startAdObserver()
@@ -711,6 +718,10 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
 
   pauseAutoplayMedia()
   injectGlobalStyle()
+  // Re-asserted after the backend's actions (and after the local heuristic), so a
+  // 'keep'/'emphasize' on a block that overlaps a hand-tuned region can't un-blur it:
+  // a hardcoded rule is a deliberate choice and outranks any inference. Idempotent.
+  applySiteRules()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
   startAdObserver()
