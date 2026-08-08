@@ -1,3 +1,4 @@
+import { ANALYZE_PORT } from '../shared/messaging'
 import type { AnalyzeBackendResult, SimplifyResponse, VisualProfile } from '../types/analysis'
 import { DEFAULT_PROFILE, loadCalibratedProfile } from './defaultProfile'
 import { extractPage } from './extract'
@@ -73,7 +74,6 @@ async function profileFor(settings: SimplifySettings): Promise<VisualProfile> {
 //
 // None of them is a failure state: each resolves like any other unreachable-backend
 // result, so the local heuristic runs and the page still gets simplified.
-const ANALYZE_PORT = 'distill-analyze'
 // Four missed 5s heartbeats. Long enough to ride out a busy main thread, short enough
 // that a stall is caught in seconds rather than at the ceiling.
 const HEARTBEAT_TIMEOUT_MS = 20000
