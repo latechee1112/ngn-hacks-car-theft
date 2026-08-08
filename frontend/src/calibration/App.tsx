@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GazeResult } from 'webeyetrack'
 import Icon from '../sidepanel/Icon'
 import {
@@ -10,7 +10,7 @@ import {
 } from '../types/calibration'
 import { combineGazeStats, computeTrialGazeStats, type TrialGazeStats } from './gaze/aggregate'
 import DotCalibration from './gaze/DotCalibration'
-import { toPagePoint, type PageGazePoint } from './gaze/hitTest'
+import { currentTargetRect, isOnTarget, toPagePoint, type PageGazePoint } from './gaze/hitTest'
 import { GAZE_VIDEO_ID, useGazeTracker } from './gaze/useGazeTracker'
 import TrialTask from './TrialTask'
 import { TRIALS } from './trials'
@@ -111,21 +111,41 @@ function App() {
   const gazeSamplesRef = useRef<PageGazePoint[]>([])
   const trialGazeStatsRef = useRef<TrialGazeStats[]>([])
   const trialStartRef = useRef(0)
-  // Live gaze-position dot: written to directly via style.transform on every
-  // sample (~24Hz) rather than React state, so it doesn't re-render the tree
-  // on every frame - same imperative-ref pattern as gazeSamplesRef above.
+  // Live gaze-position dot: moved on a fixed 500ms snapshot interval (see
+  // the effect below) rather than on every sample, which is what actually
+  // fixes the jitter - individual gaze samples are noisy, but a snapshot
+  // taken every half second reads as a deliberate, calm update instead of
+  // a shaky live feed. latestGazePointRef just holds the most recent raw
+  // sample for that timer to read; it's written on every sample (cheap, no
+  // DOM touch) but only consumed once per tick.
   const gazeDotRef = useRef<HTMLDivElement | null>(null)
+  const latestGazePointRef = useRef<PageGazePoint | null>(null)
+  const GAZE_DOT_SNAPSHOT_MS = 500
 
   const handleGazeSample = useCallback((result: GazeResult, capturedAt: number) => {
     const point = toPagePoint(result, capturedAt)
     if (point) {
       gazeSamplesRef.current.push(point)
-      if (gazeDotRef.current) {
-        gazeDotRef.current.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%)`
-        gazeDotRef.current.style.opacity = '1'
-      }
+      latestGazePointRef.current = point
     }
   }, [])
+
+  useEffect(() => {
+    if (step !== 'trials' || !gazeEnabledRef.current) return
+    const id = window.setInterval(() => {
+      const point = latestGazePointRef.current
+      const dot = gazeDotRef.current
+      if (!point || !dot) return
+      const targetRect = currentTargetRect()
+      const showAt = isOnTarget(point, targetRect)
+        ? { x: targetRect!.left + targetRect!.width / 2, y: targetRect!.top + targetRect!.height / 2 }
+        : point
+      dot.style.transform = `translate3d(${showAt.x}px, ${showAt.y}px, 0) translate(-50%, -50%)`
+      dot.style.opacity = '1'
+    }, GAZE_DOT_SNAPSHOT_MS)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, trialIndex])
 
   const tracker = useGazeTracker(handleGazeSample)
 
@@ -228,7 +248,7 @@ function App() {
 
   if (step === 'camera') {
     return (
-      <Shell>
+      <Shell showGlow>
         <h1 className="text-title font-semibold text-on-background">One optional step</h1>
         <p className="text-body text-on-surface-variant">
           Distill can use your camera to see where you're looking during the tasks below, which makes the result
@@ -260,7 +280,7 @@ function App() {
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity] duration-150"
+            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-150 ease-out"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
