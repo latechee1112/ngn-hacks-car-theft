@@ -1,6 +1,7 @@
 import type { BlockAction, LayoutSettings } from '../types/analysis'
 import {
   AD_HIDDEN_CLASS,
+  DEEMPHASIZE_CLASS,
   isAdLike,
   isAdNetworkFrame,
   isPopupLike,
@@ -11,6 +12,7 @@ import {
 } from './dom-heuristics'
 import { FF_ID_ATTR } from './extract'
 import { pruneDetachedOriginals, restoreAllOriginal, saveOriginal } from './originalState'
+import { applySiteRules, HARD_BLUR_CLASS } from './siteRules'
 
 const SIMPLIFIED_ATTR = 'data-distill-simplified'
 const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
@@ -18,7 +20,6 @@ const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
 const READING_COLUMN_CLASS = 'distill-reading-column'
-const DEEMPHASIZE_CLASS = 'distill-deemphasize'
 const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
 const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
@@ -317,6 +318,7 @@ function deemphasizeSecondary(primary: Element | null): number {
 export interface PrefilterResult {
   adsHidden: number
   deemphasized: number
+  siteRuleBlurred: number
 }
 
 export function prefilterPage(): PrefilterResult {
@@ -326,8 +328,12 @@ export function prefilterPage(): PrefilterResult {
   const primary = findPrimaryContent()
   const adsHidden = hideAds(primary)
   const deemphasized = deemphasizeSecondary(primary)
+  // Hand-tuned per-site regions (see siteRules.ts). Runs last so it can blur things
+  // the generic passes deliberately left alone, and uses its own class so the
+  // backend's block actions never clear it.
+  const siteRuleBlurred = applySiteRules()
   startAdObserver()
-  return { adsHidden, deemphasized }
+  return { adsHidden, deemphasized, siteRuleBlurred }
 }
 
 function hideAds(primary: Element | null, roots?: Element[]): number {
@@ -455,6 +461,32 @@ html[${SIMPLIFIED_ATTR}] .${READING_COLUMN_CLASS} h3 {
 .${DEEMPHASIZE_CLASS} a[href] {
   opacity: 1 !important;
   filter: none !important;
+}
+/* Hand-tuned per-site targets (siteRules.ts). Unlike .${DEEMPHASIZE_CLASS}, this does
+   NOT exempt nested links/buttons — every one of these targets (Like button, team
+   member links, tab links) is interactive, and blurring social proof only works if it
+   covers those too. Hover still reveals, so nothing becomes unreachable, and
+   pointer-events stay on so the revealed control is clickable. */
+.${HARD_BLUR_CLASS},
+.${HARD_BLUR_CLASS} a[href],
+.${HARD_BLUR_CLASS} button,
+.${HARD_BLUR_CLASS} img {
+  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
+  transition: filter 0.2s ease, opacity 0.2s ease !important;
+}
+.${HARD_BLUR_CLASS} {
+  opacity: 0.5 !important;
+}
+.${HARD_BLUR_CLASS}:hover,
+.${HARD_BLUR_CLASS}:focus-within,
+.${HARD_BLUR_CLASS}:hover a[href],
+.${HARD_BLUR_CLASS}:focus-within a[href],
+.${HARD_BLUR_CLASS}:hover button,
+.${HARD_BLUR_CLASS}:focus-within button,
+.${HARD_BLUR_CLASS}:hover img,
+.${HARD_BLUR_CLASS}:focus-within img {
+  filter: none !important;
+  opacity: 1 !important;
 }
 /* Un-sticking must not change layout. position:static would drop a fixed header into
    normal flow, pushing everything below it down — on a site whose hero sizes itself

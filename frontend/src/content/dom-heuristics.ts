@@ -3,6 +3,11 @@
 // extract) — and so the "is this filtered?" check is one shared definition.
 export const AD_HIDDEN_CLASS = 'distill-ad-hidden'
 
+// Blur/dim applied to secondary content. Lives here for the same reason as the class
+// above: modules other than simplify.ts (siteRules.ts) need to reference it without
+// importing simplify, which imports them.
+export const DEEMPHASIZE_CLASS = 'distill-deemphasize'
+
 export function isPrefilteredAd(el: Element): boolean {
   return !!el.closest(`.${AD_HIDDEN_CLASS}`)
 }

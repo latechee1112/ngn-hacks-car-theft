@@ -96,7 +96,8 @@ function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendR
 async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResult> {
   const prefiltered = prefilterPage()
   console.log(
-    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s) and blurred ${prefiltered.deemphasized} secondary region(s) before analysis`,
+    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s), blurred ${prefiltered.deemphasized} secondary region(s) ` +
+      `and ${prefiltered.siteRuleBlurred} site-rule region(s) before analysis`,
   )
 
   const result = await requestBackendAnalysis(await profileFor(settings))
