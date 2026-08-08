@@ -119,9 +119,12 @@ function App() {
   // sample for that timer to read; it's written on every sample (cheap, no
   // DOM touch) but only consumed once per tick.
   // The dot's CSS transition duration (below, in the 'trials' JSX) is set
-  // to match this exactly, with a linear easing - so one snapshot's glide
-  // finishes right as the next one starts, with no dead pause and no
-  // ease-out deceleration-to-a-stop at the boundary. Change one, change both.
+  // to match this exactly - so one snapshot's glide finishes right as the
+  // next one starts, with no dead pause between them. The easing curve
+  // ends and starts each segment at zero velocity, which is fine since
+  // there's no gap for that to read as a stall - it's what gives the
+  // motion an eased, organic feel instead of constant-speed robotic panning.
+  // Change the duration here, change it in the className too.
   const gazeDotRef = useRef<HTMLDivElement | null>(null)
   const latestGazePointRef = useRef<PageGazePoint | null>(null)
   const GAZE_DOT_SNAPSHOT_MS = 500
@@ -140,15 +143,19 @@ function App() {
       const point = latestGazePointRef.current
       const dot = gazeDotRef.current
       if (!point || !dot) return
-      // Snap onto the target's center once gaze is within the same
+      // Pull toward the target's center once gaze is within the same
       // tolerance hit-testing uses to count it as "on the target"
-      // (hitTest.ts's HIT_TOLERANCE_PX) - so the snap only fires when a
-      // hit would actually be scored, not as a separate, more lenient
-      // magnet radius.
+      // (hitTest.ts's HIT_TOLERANCE_PX), so it reads as "on the target"
+      // rather than drifting off it - but only a partial pull, not a hard
+      // snap, so it still moves a little with the raw signal instead of
+      // freezing dead-center for as long as gaze stays in range.
       const targetRect = currentTargetRect()
       const showAt =
         targetRect && isOnTarget(point, targetRect)
-          ? { x: targetRect.left + targetRect.width / 2, y: targetRect.top + targetRect.height / 2 }
+          ? {
+              x: point.x * 0.4 + (targetRect.left + targetRect.width / 2) * 0.6,
+              y: point.y * 0.4 + (targetRect.top + targetRect.height / 2) * 0.6,
+            }
           : point
       dot.style.transform = `translate3d(${showAt.x}px, ${showAt.y}px, 0) translate(-50%, -50%)`
       dot.style.opacity = '1'
@@ -289,7 +296,7 @@ function App() {
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[500ms] ease-linear"
+            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[500ms] ease-[cubic-bezier(0.45,0,0.55,1)]"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
