@@ -84,6 +84,12 @@ export interface GazeTracker {
   // x/y are viewport-normalized, range [-0.5, 0.5], same convention as
   // GazeResult.normPog - see calibrationFit.ts.
   registerCalibrationPoint: (x: number, y: number) => void
+  // Drops whatever's accumulated in the sample buffer without fitting on
+  // it - see CALIBRATION_SETTLE_MS in calibrationFit.ts. Lets a caller
+  // discard pre-settle frames after a new dot appears, so only frames
+  // captured once the eye has actually arrived end up in the next
+  // registerCalibrationPoint call.
+  clearCalibrationBuffer: () => void
 }
 
 export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number) => void): GazeTracker {
@@ -156,5 +162,9 @@ export function useGazeTracker(onSample: (result: GazeResult, capturedAt: number
     recentSamplesRef.current = []
   }, [])
 
-  return { ready, start, stop, registerCalibrationPoint }
+  const clearCalibrationBuffer = useCallback(() => {
+    recentSamplesRef.current = []
+  }, [])
+
+  return { ready, start, stop, registerCalibrationPoint, clearCalibrationBuffer }
 }

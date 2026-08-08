@@ -111,23 +111,18 @@ function App() {
   const gazeSamplesRef = useRef<PageGazePoint[]>([])
   const trialGazeStatsRef = useRef<TrialGazeStats[]>([])
   const trialStartRef = useRef(0)
-  // Live gaze-position dot: moved on a fixed 500ms snapshot interval (see
-  // the effect below) rather than on every sample, which is what actually
-  // fixes the jitter - individual gaze samples are noisy, but a snapshot
-  // taken every half second reads as a deliberate, calm update instead of
-  // a shaky live feed. latestGazePointRef just holds the most recent raw
-  // sample for that timer to read; it's written on every sample (cheap, no
-  // DOM touch) but only consumed once per tick.
-  // The dot's CSS transition duration (below, in the 'trials' JSX) is set
-  // to match this exactly - so one snapshot's glide finishes right as the
-  // next one starts, with no dead pause between them. The easing curve
-  // ends and starts each segment at zero velocity, which is fine since
-  // there's no gap for that to read as a stall - it's what gives the
-  // motion an eased, organic feel instead of constant-speed robotic panning.
-  // Change the duration here, change it in the className too.
+  // Live gaze-position dot: moved on a fixed snapshot interval (see the
+  // effect below) rather than on every sample, mainly to avoid a DOM write
+  // on every single gaze sample. Jitter-hiding is now the blob's job (its
+  // size/softness and the CSS transition below), not this interval - it
+  // used to be 500ms doing double duty as the anti-jitter mechanism, which
+  // is what made the dot visibly lag real eye movements. latestGazePointRef
+  // just holds the most recent raw sample for that timer to read; it's
+  // written on every sample (cheap, no DOM touch) but only consumed once
+  // per tick.
   const gazeDotRef = useRef<HTMLDivElement | null>(null)
   const latestGazePointRef = useRef<PageGazePoint | null>(null)
-  const GAZE_DOT_SNAPSHOT_MS = 500
+  const GAZE_DOT_SNAPSHOT_MS = 120
 
   const handleGazeSample = useCallback((result: GazeResult, capturedAt: number) => {
     const point = toPagePoint(result, capturedAt)
@@ -298,7 +293,15 @@ function App() {
           <div
             ref={gazeDotRef}
             aria-hidden="true"
-            className="pointer-events-none fixed top-0 left-0 z-50 h-4 w-4 rounded-full bg-danger-text opacity-0 shadow-[0_0_0_4px_rgb(231_154_148_/_25%)] transition-[opacity,transform] duration-[500ms] ease-[cubic-bezier(0.45,0,0.55,1)]"
+            // A soft blob, not a precise dot - sized off hitTest.ts's own
+            // ~85-90px gaze error estimate (h-44/w-44 = 176px diameter) so
+            // the visual honestly matches the tracker's real uncertainty
+            // instead of implying pixel precision it doesn't have. Kept
+            // short (vs. the snapshot interval above) so it settles at the
+            // new position rather than visibly trailing toward it - the
+            // blob's own softness absorbs jitter, so this no longer needs
+            // to be slow to look calm.
+            className="pointer-events-none fixed top-0 left-0 z-50 h-44 w-44 rounded-full bg-[radial-gradient(circle,_rgb(231_154_148_/_55%)_0%,_rgb(231_154_148_/_22%)_45%,_transparent_75%)] opacity-0 blur-sm transition-[opacity,transform] duration-[220ms] ease-out"
           />
         )}
         <p className="text-meta font-semibold tracking-[0.08em] text-on-surface-variant uppercase">
