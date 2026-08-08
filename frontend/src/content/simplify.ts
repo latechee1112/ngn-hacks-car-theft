@@ -283,7 +283,11 @@ function collectSidebarColumns(): Element[] {
   return found
 }
 
-function collectSecondaryTargets(primary: Element | null): Element[] {
+// `spared` holds the blocks the backend explicitly ruled 'keep' or 'emphasize'. This
+// pass runs after the backend's, so without that list it would re-blur, on shape alone,
+// blocks the model just read the page and decided to keep — the exact precedence the
+// emphasize/keep cases exist to establish.
+function collectSecondaryTargets(primary: Element | null, spared: Element[] = []): Element[] {
   const targets = new Set<Element>()
 
   const consider = (el: Element) => {
@@ -293,6 +297,9 @@ function collectSecondaryTargets(primary: Element | null): Element[] {
     if (primary && (el === primary || el.contains(primary) || primary.contains(el))) return
     if (el === document.body || el === document.documentElement) return
     if (el.closest(`.${AD_HIDDEN_CLASS}`)) return
+    // Blurring an ancestor blurs the spared block with it, so overlap in either
+    // direction disqualifies the target.
+    if (spared.some((keep) => keep === el || keep.contains(el) || el.contains(keep))) return
     targets.add(el)
   }
 
@@ -302,8 +309,8 @@ function collectSecondaryTargets(primary: Element | null): Element[] {
   return pruneNested(Array.from(targets))
 }
 
-function deemphasizeSecondary(primary: Element | null): number {
-  const targets = collectSecondaryTargets(primary)
+function deemphasizeSecondary(primary: Element | null, spared: Element[] = []): number {
+  const targets = collectSecondaryTargets(primary, spared)
   targets.forEach((el) => {
     saveOriginal(el)
     el.classList.add(DEEMPHASIZE_CLASS)
