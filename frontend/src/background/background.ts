@@ -13,9 +13,6 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('[Distill] service worker installed')
 })
 
-// Open the side panel when the user clicks the toolbar icon (instead of a popup).
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error)
-
 async function analyzePage(payload: unknown): Promise<AnalyzeBackendResult> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS)

@@ -13,10 +13,8 @@
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
-    }
-  },
-  "side_panel": {
-    "default_path": "sidepanel.html"
+    },
+    "default_popup": "sidepanel.html"
   },
   "background": {
     "service_worker": "background.js",
@@ -29,6 +27,6 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["sidePanel", "storage", "scripting", "activeTab"],
+  "permissions": ["storage", "scripting", "activeTab"],
   "host_permissions": ["<all_urls>"]
 }

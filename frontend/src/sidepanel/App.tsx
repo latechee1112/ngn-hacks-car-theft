@@ -131,7 +131,7 @@ function App() {
   }
 
   return (
-    <div className="relative mx-auto flex h-screen w-full max-w-[400px] flex-col overflow-hidden border-x border-outline bg-background">
+    <div className="relative flex max-h-[600px] w-full flex-col overflow-hidden bg-background">
       <header className="flex w-full shrink-0 items-center justify-between border-b border-outline bg-background px-4 py-3">
         <div className="flex items-center gap-2">
           <Icon name="funnel" className="text-on-background" />
