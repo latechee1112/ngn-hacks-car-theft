@@ -25,6 +25,14 @@ const NEUTRAL_COLOR = '#1a1a1a'
 const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
 const PROGRESSIVE_CONTROLS_ID = 'distill-progressive-controls'
 const SECTION_HEADING_SELECTOR = /^h[23]$/i
+const BLUR_INTENSITY_PROP = '--distill-blur-intensity'
+// Matches the sidepanel's new Intensity default (75%) - deemphasized content
+// should already read as strongly blurred/censored the first time a page is
+// simplified, before the user ever touches the slider.
+const DEFAULT_BLUR_INTENSITY = 0.75
+// Blur radius at 100% intensity. Strong enough to make text illegible (true
+// "censoring") without needing an opaque overlay.
+const MAX_BLUR_PX = 8
 
 const NOISE_SELECTOR =
   'nav, aside, footer, [role="navigation"], [role="complementary"], [role="contentinfo"], ' +
@@ -257,11 +265,12 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS} h3 {
 }
 html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} {
   opacity: 0.4 !important;
-  filter: grayscale(60%) !important;
-  transition: opacity 0.2s ease !important;
+  filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
+  transition: opacity 0.2s ease, filter 0.2s ease !important;
 }
 html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS}:hover {
   opacity: 0.85 !important;
+  filter: grayscale(60%) !important;
 }
 html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} input,
 html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} button,
@@ -573,6 +582,25 @@ export function applyLayoutPreferences(prefs: LayoutPreferences): void {
   setIncreaseSpacing(prefs.increaseSpacing)
 }
 
+// --- Deemphasis blur intensity ---------------------------------------------
+// Drives how strongly blurred/"censored" deemphasized (not collapsed) content
+// looks. Fed by the sidepanel's Intensity slider (same 0-1 value already sent
+// to the backend as simplificationStrength) - one dial controls both how much
+// gets collapsed outright and how illegible whatever's merely deemphasized is.
+
+export function getBlurIntensity(): number {
+  const raw = document.documentElement.style.getPropertyValue(BLUR_INTENSITY_PROP)
+  const parsed = Number.parseFloat(raw)
+  return Number.isFinite(parsed) ? parsed : DEFAULT_BLUR_INTENSITY
+}
+
+// fraction is 0-1, matching SimplifySettings.simplificationStrength.
+export function setBlurIntensity(fraction: number): boolean {
+  if (!isSimplificationActive()) return false
+  document.documentElement.style.setProperty(BLUR_INTENSITY_PROP, String(fraction))
+  return true
+}
+
 // --- Progressive reveal ---------------------------------------------------
 
 export interface ProgressiveRevealResult {
@@ -801,6 +829,7 @@ export function restoreOriginalPage(): void {
   document.documentElement.removeAttribute(REDUCE_MOTION_ATTR)
   document.documentElement.style.removeProperty('--distill-text-scale')
   document.documentElement.style.removeProperty('--distill-spacing')
+  document.documentElement.style.removeProperty(BLUR_INTENSITY_PROP)
   document.getElementById(STYLE_TAG_ID)?.remove()
   document.getElementById(RESTORE_BTN_ID)?.remove()
 }

@@ -19,6 +19,7 @@ import {
   isSpacingIncreased,
   prefilterAds,
   restoreOriginalPage,
+  setBlurIntensity,
   setIncreaseSpacing,
   setReduceColorVariation,
   setReduceMotion,
@@ -110,6 +111,9 @@ async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResul
     reduceMotion: settings.reduceMotion,
     increaseSpacing: settings.increaseSpacing,
   })
+  // Same Intensity value the backend used for classification also drives how
+  // strongly blurred deemphasized (not collapsed) content looks.
+  setBlurIntensity(settings.simplificationStrength)
 
   return outcome
 }
