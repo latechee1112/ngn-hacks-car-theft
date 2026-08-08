@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { CALIBRATION_DOT_INTERVAL_MS, CALIBRATION_DOTS, dotToNormalizedPoint } from './calibrationFit'
+import {
+  CALIBRATION_DOT_INTERVAL_MS,
+  CALIBRATION_DOTS,
+  CALIBRATION_SETTLE_MS,
+  dotToNormalizedPoint,
+} from './calibrationFit'
 import { GAZE_VIDEO_ID, type GazeTracker } from './useGazeTracker'
 
 function DotCalibration({
@@ -32,14 +37,23 @@ function DotCalibration({
       return
     }
     const dot = CALIBRATION_DOTS[dotIndex]
-    // Dwell on the new dot so the user has fixated and the sample buffer
-    // has filled before we register the point (see calibrationFit.ts).
-    const dwell = window.setTimeout(() => {
+    // Two-phase dwell: settle discards whatever the buffer picked up while
+    // the eye was still moving toward this dot (reaction time + saccade),
+    // then capture registers only what accumulates after that - see
+    // CALIBRATION_SETTLE_MS in calibrationFit.ts for why this matters more
+    // than it looks like it should.
+    const settle = window.setTimeout(() => {
+      tracker.clearCalibrationBuffer()
+    }, CALIBRATION_SETTLE_MS)
+    const capture = window.setTimeout(() => {
       const [x, y] = dotToNormalizedPoint(dot)
       tracker.registerCalibrationPoint(x, y)
       setDotIndex((i) => i + 1)
     }, CALIBRATION_DOT_INTERVAL_MS)
-    return () => window.clearTimeout(dwell)
+    return () => {
+      window.clearTimeout(settle)
+      window.clearTimeout(capture)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tracker.ready, dotIndex])
 
