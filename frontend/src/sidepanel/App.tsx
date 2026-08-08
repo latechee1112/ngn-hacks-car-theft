@@ -30,6 +30,22 @@ const EXTENSION_VERSION = chrome.runtime.getManifest().version
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-on-surface-variant focus-visible:ring-offset-2 focus-visible:ring-offset-background'
 
+// One restrained glass language, reused by every button in the panel instead of each
+// picking its own surface treatment: translucent fill + backdrop blur + a hairline
+// border, uniform on all four sides. No gradients, no glow, no per-button variation
+// beyond the tint. (An earlier version added an inset top highlight on top of this
+// same border — the two overlapped only along the top edge, so it read as visibly
+// thicker there than the other three sides. Left out for that reason.) GLASS carries
+// the shared mechanics; each variant below only supplies the tint and its hover state.
+const GLASS = 'backdrop-blur-md backdrop-saturate-150 border transition-colors'
+const GLASS_SECONDARY = `${GLASS} border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/15`
+const GLASS_ACCENT = `${GLASS} border-accent-text/30 bg-accent/55 hover:bg-accent/70`
+const GLASS_DEBUG = `${GLASS} border-debug-text/30 bg-debug/15 hover:bg-debug/25`
+// No fill at rest — the glass only condenses in on hover/focus, for the one button
+// that's meant to read as the lowest-emphasis action in the panel.
+const GLASS_GHOST =
+  'border border-transparent transition-colors hover:border-white/10 hover:bg-white/6 hover:backdrop-blur-md hover:backdrop-saturate-150'
+
 // The panel unmounts every time it closes, so the Simplification Controls have
 // to persist somewhere. chrome.storage.local (the "storage" permission is
 // already in the manifest) keeps them across opens and across browser restarts.
@@ -424,10 +440,8 @@ function App() {
             onClick={simplified ? restorePage : simplifyPage}
             disabled={analyzing}
             aria-busy={analyzing}
-            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium transition-colors ${FOCUS_RING} ${
-              analyzing
-                ? 'cursor-wait border border-outline bg-surface text-on-surface-variant'
-                : 'bg-accent text-accent-fg hover:bg-accent-hover'
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium ${FOCUS_RING} ${
+              analyzing ? `cursor-wait ${GLASS_SECONDARY} text-on-surface-variant` : `${GLASS_ACCENT} text-accent-fg`
             }`}
           >
             {analyzing ? (
@@ -444,7 +458,7 @@ function App() {
           </button>
           <button
             type="button"
-            className={`flex w-full items-center justify-center gap-2 rounded-md border border-outline bg-surface px-4 py-2 text-body font-medium text-on-surface transition-colors hover:bg-surface-hover ${FOCUS_RING}`}
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium text-on-surface ${GLASS_SECONDARY} ${FOCUS_RING}`}
           >
             <Icon name="sliders" />
             View Settings
@@ -452,7 +466,7 @@ function App() {
           <button
             type="button"
             onClick={openCalibration}
-            className={`flex w-full items-center justify-center gap-2 rounded-md border border-outline bg-surface px-4 py-2 text-body font-medium text-on-surface transition-colors hover:bg-surface-hover ${FOCUS_RING}`}
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium text-on-surface ${GLASS_SECONDARY} ${FOCUS_RING}`}
           >
             <Icon name="eye" />
             Recalibrate
@@ -561,7 +575,7 @@ function App() {
         <div>
           <button
             type="button"
-            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body text-on-surface-variant transition-colors hover:bg-surface hover:text-on-surface ${FOCUS_RING}`}
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body text-on-surface-variant hover:text-on-surface ${GLASS_GHOST} ${FOCUS_RING}`}
           >
             <Icon name="expand" />
             Show everything temporarily
@@ -577,10 +591,8 @@ function App() {
             onClick={dumpRawBlocks}
             disabled={dumping}
             aria-busy={dumping}
-            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium transition-colors ${FOCUS_RING} ${
-              dumping
-                ? 'cursor-wait border border-outline bg-surface text-on-surface-variant'
-                : 'bg-debug text-debug-fg hover:bg-debug-hover'
+            className={`flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-body font-medium ${FOCUS_RING} ${
+              dumping ? `cursor-wait ${GLASS_SECONDARY} text-on-surface-variant` : `${GLASS_DEBUG} text-debug-fg`
             }`}
           >
             {dumping ? (
@@ -611,7 +623,7 @@ function App() {
                   <button
                     type="button"
                     onClick={copyRawBlocks}
-                    className={`flex items-center gap-1.5 rounded-md border border-outline bg-surface px-3 py-1 text-meta text-on-surface transition-colors hover:bg-surface-hover ${FOCUS_RING}`}
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-meta text-on-surface ${GLASS_SECONDARY} ${FOCUS_RING}`}
                   >
                     <Icon name={copied ? 'check' : 'copy'} className={copied ? 'text-debug-text' : ''} />
                     {copied ? 'Copied' : 'Copy JSON'}

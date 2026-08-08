@@ -56,11 +56,24 @@ const INTRO_MS = 560
 const LOOP_MS = 900
 const OUTRO_MS = 320
 const MIN_VISIBLE_MS = INTRO_MS + 60
+// finish() no longer reveals the page and starts fading the overlay in the same
+// breath as stop() being called. Removing 'looping' lets the beam play one final
+// pass (the same one-shot distill-scan-sweep it uses for the intro) and settle off
+// the bottom of the viewport, faded out - HOLD_MS is the pause after that, beam
+// gone and grid held steady, before the page underneath is allowed to actually
+// change. Without it, the blur/removal cascade lands while the sweep is still
+// visibly finishing, the same "still mid-animation" problem REVEAL_ATTR was built
+// to fix, just one beat later in the sequence.
+const HOLD_MS = 500
 
 const REDUCED_INTRO_MS = 220
 const REDUCED_LOOP_MS = 1100
 const REDUCED_OUTRO_MS = 220
 const REDUCED_MIN_VISIBLE_MS = REDUCED_INTRO_MS + 40
+// Shorter than HOLD_MS: reduced motion has no beam pass to wait out (the grid just
+// breathes in place), so this is a pause for the sake of legibility - "the scan is
+// done, here's what changed" - not a leftover animation with nowhere else to go.
+const REDUCED_HOLD_MS = 200
 
 // Safety net, not the normal path: if stop() can never be called, the layer has
 // to come down on its own. This is deliberately NOT a time limit — analysis has
@@ -255,14 +268,14 @@ let activeSweep: (() => void) | null = null
  * `startScanAnimation()` or let it sequence work — it is decoration running
  * alongside the real analysis call, never in front of it.
  *
- * `onReveal`, if given, fires exactly once — at the moment `finish()` starts the
- * outro fade, i.e. the earliest point the real page transformation is allowed to
- * become visible (see REVEAL_ATTR in simplify.ts). The two lines up on purpose: the
- * sweep fading away doubles as the transition into the now-simplified page, instead
- * of the transformation happening earlier and just sitting there, visible through the
- * sweep's translucent wash, while the sweep keeps looping on top of it. Never fires on
- * a teardown (superseded-by-restart) exit — that page is about to be reprocessed by
- * the sweep replacing this one, not shown as-is.
+ * `onReveal`, if given, fires exactly once — after the beam's final pass has settled
+ * and HOLD_MS has held the resolved grid on screen, right as the outro fade starts.
+ * That gap is deliberate: it gives the sweep a clean, motionless moment where it
+ * visibly reads as "done" before anything underneath it changes, rather than the
+ * page transformation and the sweep's own finish landing in the same instant (see
+ * REVEAL_ATTR in simplify.ts for why the transformation is gated on this at all).
+ * Never fires on a teardown (superseded-by-restart) exit — that page is about to be
+ * reprocessed by the sweep replacing this one, not shown as-is.
  */
 export function startScanAnimation(onReveal?: () => void): () => void {
   if (!document.body) return () => {}
@@ -278,6 +291,7 @@ export function startScanAnimation(onReveal?: () => void): () => void {
   const introMs = reduced ? REDUCED_INTRO_MS : INTRO_MS
   const outroMs = reduced ? REDUCED_OUTRO_MS : OUTRO_MS
   const minVisibleMs = reduced ? REDUCED_MIN_VISIBLE_MS : MIN_VISIBLE_MS
+  const holdMs = reduced ? REDUCED_HOLD_MS : HOLD_MS
 
   const host = document.createElement(SCAN_HOST_TAG)
   host.id = SCAN_HOST_ID
@@ -329,14 +343,20 @@ export function startScanAnimation(onReveal?: () => void): () => void {
     window.clearInterval(livenessTimer)
   }
 
-  // Normal exit: the work finished, so play the outro before removing the layer.
+  // Normal exit. Dropping 'looping' lets the beam play its final one-shot pass
+  // (the same distill-scan-sweep the intro uses) and settle off-screen, faded out,
+  // rather than just freezing wherever it happened to be mid-loop. holdMs then
+  // holds that resolved, motionless state on screen before onReveal() and the
+  // outro fire - see the note on HOLD_MS for why that pause exists at all.
   function finish(): void {
     if (removed) return
     release()
-    onReveal?.()
     root.classList.remove('looping')
-    root.classList.add('outro')
-    window.setTimeout(() => removeScanLayer(host), outroMs + 100)
+    window.setTimeout(() => {
+      onReveal?.()
+      root.classList.add('outro')
+      window.setTimeout(() => removeScanLayer(host), outroMs + 100)
+    }, holdMs)
   }
 
   // Replacement exit: a new sweep is starting, so this node goes now — an outro

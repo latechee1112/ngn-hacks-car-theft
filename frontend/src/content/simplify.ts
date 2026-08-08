@@ -4,6 +4,7 @@ import {
   DEEMPHASIZE_CLASS,
   isAdLike,
   isAdNetworkFrame,
+  isFloatingVideoPromo,
   isPopupLike,
   isProtectedFromSimplification,
   isSponsoredLabel,
@@ -28,8 +29,20 @@ const REDUCE_MOTION_ATTR = 'data-distill-reduce-motion'
 // the sweep clears. revealSimplification() is the only thing that sets this, called
 // from content.ts as the sweep's onReveal callback.
 const REVEAL_ATTR = 'data-distill-reveal'
+// Set for the duration of the "Show original page" transition (restoreOriginalPageAnimated()
+// in content.ts's happy path) - lets the blur/reading-column relax back to normal with a
+// transition instead of the classes just vanishing outright, without touching what
+// REVEAL_ATTR gates. See the note on the reveal-cascade rules below.
+const RESTORING_ATTR = 'data-distill-restoring'
 const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
+const RESTORE_BTN_EXIT_CLASS = 'distill-restore-button-exit'
+// The final, un-transitioned display:none an ad gets once its fade (gated on
+// REVEAL_ATTR, see that rule) has actually finished - see hideAds() and
+// revealSimplification(), the only two places that ever add it.
+const AD_COLLAPSE_CLASS = 'distill-ad-collapsed'
+// Matches the fade's transition-duration above with a little slack.
+const AD_FADE_SETTLE_MS = 500
 const PRIMARY_CLASS = 'distill-primary-content'
 const READING_COLUMN_CLASS = 'distill-reading-column'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
@@ -193,6 +206,25 @@ function findAdCard(label: Element, primary: Element | null): Element {
   return el
 }
 
+// Candidates for isFloatingVideoPromo() to actually decide on - the player chrome
+// that becomes position:fixed is rarely the video/branding element itself, so this
+// starts from whichever descendant gives the plainest signal (a <video>, a Connatix
+// <cnx> tag, or known player branding) and findFloatingVideoContainer() walks up
+// from there to find the ancestor that's actually pinned.
+const FLOATING_VIDEO_CANDIDATE_SELECTOR =
+  'video, cnx, [class*="cnx" i], [class*="jwplayer" i], [class*="connatix" i], ' +
+  '[class*="vidazoo" i], [class*="sticky-video" i], [class*="floating-player" i]'
+const MAX_FLOATING_VIDEO_WALK_DEPTH = 6
+
+function findFloatingVideoContainer(start: Element): Element | null {
+  let el: Element | null = start
+  for (let depth = 0; depth < MAX_FLOATING_VIDEO_WALK_DEPTH && el; depth++) {
+    if (el !== document.body && el !== document.documentElement && isFloatingVideoPromo(el)) return el
+    el = el.parentElement
+  }
+  return null
+}
+
 // `roots` scopes the scan. The first pass covers the whole document; rescans driven
 // by the observer pass only the subtrees that were actually inserted, which is what
 // keeps an infinite feed from re-querying every element on the page as you scroll.
@@ -224,6 +256,10 @@ function collectAdTargets(primary: Element | null, roots: Element[] = [document.
     })
     scan(root, SPONSORED_LABEL_SELECTOR, (el) => {
       if (isSponsoredLabel(el)) consider(findAdCard(el, primary))
+    })
+    scan(root, FLOATING_VIDEO_CANDIDATE_SELECTOR, (el) => {
+      const container = findFloatingVideoContainer(el)
+      if (container) consider(container)
     })
   })
 
@@ -360,7 +396,25 @@ function hideAds(primary: Element | null, roots?: Element[]): number {
     saveOriginal(el)
     el.classList.add(AD_HIDDEN_CLASS)
   })
+  // The common case - the initial prefilter pass, well before the page has been
+  // revealed - is handled by revealSimplification() instead: it re-scans for every
+  // .${AD_HIDDEN_CLASS} once REVEAL_ATTR is actually set, this batch included. This
+  // branch only matters for ads found *after* that (a feed loading a new sponsored
+  // card via the mutation observer below) - REVEAL_ATTR is already set by then, so
+  // nothing else is ever going to schedule this batch's collapse.
+  if (targets.length && document.documentElement.hasAttribute(REVEAL_ATTR)) {
+    scheduleAdCollapse(targets as HTMLElement[])
+  }
   return targets.length
+}
+
+function scheduleAdCollapse(targets: HTMLElement[]): void {
+  window.setTimeout(() => {
+    targets.forEach((el) => {
+      el.classList.add(AD_COLLAPSE_CLASS)
+      el.style.removeProperty('--distill-reveal-delay')
+    })
+  }, AD_FADE_SETTLE_MS)
 }
 
 // Feeds stream new promoted posts in as you scroll, so a one-shot sweep only holds
@@ -460,21 +514,56 @@ html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} h3 {
   margin-top: 1.4em !important;
   margin-bottom: 0.6em !important;
 }
-/* Ads are the one thing NOT gated on [${REVEAL_ATTR}] - see the ad rule below.
-   Everything else that visibly reshapes the page waits for it: deemphasizeSecondary()
-   now runs inside applyBackendActions(), after the backend answers, but the backend
-   usually answers well after the scan sweep's intro has already finished (the sweep
-   is a translucent wash, not an opaque cover) - so without this gate the dim/blur
-   effect is plainly visible landing mid-sweep instead of appearing once the sweep
-   resolves. See the note on REVEAL_ATTR's declaration. */
+/* Everything that visibly reshapes the page - this included, see the ad rule below -
+   waits for [${REVEAL_ATTR}]: deemphasizeSecondary() and hideAds() both run well before
+   the scan sweep has actually finished (the sweep is a translucent wash, not an opaque
+   cover, and the backend usually answers before the sweep's own hold/outro are done) -
+   so without this gate the dim/blur/removal effects are plainly visible landing mid-sweep
+   instead of appearing once the sweep resolves. See the note on REVEAL_ATTR's declaration. */
+/* transition-delay is deliberately left out of the !important above: a shorthand's
+   !important covers every sub-property it sets, including delay, which would bury
+   the per-element stagger revealSimplification() writes to --distill-reveal-delay
+   (see there). Nothing else styles that custom property, so leaving this one
+   longhand non-important is safe - there's no host-page rule to lose a fight to. */
 html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} {
   opacity: 0.4 !important;
   filter: blur(calc(var(${BLUR_INTENSITY_PROP}, ${DEFAULT_BLUR_INTENSITY}) * ${MAX_BLUR_PX}px)) grayscale(60%) !important;
-  transition: opacity 0.2s ease, filter 0.2s ease !important;
+  transition-property: opacity, filter !important;
+  transition-duration: 0.6s, 0.6s !important;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1), cubic-bezier(0.22, 1, 0.36, 1) !important;
+  transition-delay: var(--distill-reveal-delay, 0ms);
 }
 html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS}:hover {
   opacity: 0.85 !important;
   filter: grayscale(60%) !important;
+}
+/* The "Show original page" undo, playing in reverse of the reveal cascade above:
+   restoreOriginalPageAnimated() sets RESTORING_ATTR and a fresh --distill-reveal-delay
+   per element (this time counting up from the bottom of the viewport, so the wave
+   rolls upward - a visibly different motion from the top-down settle-in, not just the
+   same animation backwards), then actually tears the classes down once the transition
+   has had time to finish. Three attribute selectors beats [${REVEAL_ATTR}]'s two, so
+   this simply outranks it - no need to fight the dim rule's !important a second time. */
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}][${RESTORING_ATTR}] .${DEEMPHASIZE_CLASS} {
+  opacity: 1 !important;
+  filter: none !important;
+  transition-property: opacity, filter !important;
+  transition-duration: 0.4s, 0.4s !important;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition-delay: var(--distill-reveal-delay, 0ms);
+}
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}][${RESTORING_ATTR}] .${READING_COLUMN_CLASS} {
+  max-width: none !important;
+  font-size: 1em !important;
+  transition: max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1), font-size 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+/* The button's own exit: a soft dissolve instead of blinking out of existence the
+   instant the DOM node is removed. */
+#${RESTORE_BTN_ID}.${RESTORE_BTN_EXIT_CLASS} {
+  opacity: 0 !important;
+  transform: translateY(6px) scale(0.96) !important;
+  transition: opacity 0.3s ease, transform 0.3s ease !important;
+  pointer-events: none;
 }
 html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} input,
 html[${REVEAL_ATTR}] .${DEEMPHASIZE_CLASS} button,
@@ -535,23 +624,41 @@ html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS
 html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):not(button a) {
   text-decoration: underline !important;
 }
+/* Glassmorphism, not a solid card: this floats over an arbitrary host page, so
+   backdrop-filter actually has real content behind it to frost - a true glass
+   effect, not a simulated one. Kept restrained on purpose: one blur radius, one
+   thin border - no gradients, no color tint, no glow. No inset highlight: stacked
+   on top of the real border it made the top edge read visibly thicker than the
+   other three, since the border and the highlight sit right on top of each other
+   only along that one edge. Text-align and flex-centering are explicit rather
+   than left to the button's default, in case the host page's own CSS reset
+   (button { text-align: inherit }, a body-level text-align, etc.) reaches in and
+   pulls the label off-center. */
 #${RESTORE_BTN_ID} {
   position: fixed;
   bottom: 20px;
   right: 20px;
   z-index: 2147483647;
-  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 20, 22, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
   color: #fff;
-  border: 2px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
   padding: 14px 24px;
   min-height: 48px;
   font: 700 16px system-ui, sans-serif;
+  text-align: center;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 #${RESTORE_BTN_ID}:hover {
-  background: #333;
+  background: rgba(38, 38, 42, 0.65);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 #${RESTORE_BTN_ID}:focus-visible {
   outline: 3px solid #fff;
@@ -560,11 +667,24 @@ html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS
 html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${SECTION_HIDDEN_CLASS} {
   display: none !important;
 }
-/* Deliberately NOT gated on [${SIMPLIFIED_ATTR}]: the ad pre-filter runs before the
-   backend analysis, so this has to bite while the page is still "not simplified yet".
-   Swap display:none for filter: blur(6px) + pointer-events:none to keep filtered
-   units visible-but-muted instead of gone. */
-.${AD_HIDDEN_CLASS} {
+/* Ads are found and marked the instant hideAds() runs - still the frontend's own
+   local, independent detection, never the backend's - but the visible removal now
+   waits for [${REVEAL_ATTR}] like everything else above, and fades rather than just
+   vanishing. display:none can't be transitioned, so the fade (opacity + blur) plays
+   first while the element is still in flow; JS adds .${AD_COLLAPSE_CLASS} once that
+   fade has had time to finish (see revealSimplification() and hideAds()), which is
+   the point .${AD_COLLAPSE_CLASS}'s plain display:none actually closes the gap - by
+   then the element is already invisible, so that doesn't read as a second jump. */
+html[${REVEAL_ATTR}] .${AD_HIDDEN_CLASS} {
+  opacity: 0 !important;
+  filter: blur(6px) !important;
+  pointer-events: none !important;
+  transition-property: opacity, filter !important;
+  transition-duration: 0.4s, 0.4s !important;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition-delay: var(--distill-reveal-delay, 0ms);
+}
+.${AD_COLLAPSE_CLASS} {
   display: none !important;
 }
 #${PROGRESSIVE_CONTROLS_ID} {
@@ -575,30 +695,39 @@ html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${SECTION_HIDDEN_CLASS} {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #1a1a1a;
+  background: rgba(20, 20, 22, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
   color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 14px;
   padding: 11px 16px;
   font: 700 15px/1.3 system-ui, sans-serif;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 #${PROGRESSIVE_CONTROLS_ID} button {
-  background: #333;
-  border: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: inherit;
   font: inherit;
+  text-align: center;
   cursor: pointer;
   padding: 9px 15px;
   min-height: 44px;
   min-width: 44px;
   border-radius: 9px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:disabled {
   opacity: 0.35;
   cursor: default;
 }
 #${PROGRESSIVE_CONTROLS_ID} button:hover:not(:disabled) {
-  background: #4a4a4a;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 #${PROGRESSIVE_CONTROLS_ID} button:focus-visible {
   outline: 3px solid #fff;
@@ -626,7 +755,7 @@ function ensureRestoreButton(): void {
   btn.id = RESTORE_BTN_ID
   btn.type = 'button'
   btn.textContent = 'Show original page'
-  btn.addEventListener('click', restoreOriginalPage)
+  btn.addEventListener('click', restoreOriginalPageAnimated)
   document.body.appendChild(btn)
 }
 
@@ -638,11 +767,57 @@ export function isSimplificationActive(): boolean {
   return document.documentElement.getAttribute(SIMPLIFIED_ATTR) === 'true'
 }
 
+// A gentle top-to-bottom cascade, echoing the beam that just swept the same
+// direction: the closer to the top of the viewport a block is, the sooner it
+// resolves. Capped well short of feeling laggy, and only spans the viewport — a
+// long page's off-screen content all shares the cap rather than queuing up a
+// wave the user would have to scroll to see finish. Shared by deemphasized and
+// ad-hidden elements alike, so the whole page settles as one cascade rather than
+// two staggered ones running out of sync with each other.
+const REVEAL_STAGGER_MAX_MS = 260
+const REVEAL_STAGGER_MS_PER_PX = 0.16
+// Long enough to outlast REVEAL_STAGGER_MAX_MS plus the 0.6s transition it feeds,
+// short enough that a later, unrelated class toggle (progressive reveal paging)
+// can't inherit a stale delay from this pass.
+const REVEAL_STAGGER_CLEANUP_MS = 1200
+
+function setRevealDelay(el: HTMLElement): void {
+  const top = Math.max(0, el.getBoundingClientRect().top)
+  const delay = Math.min(REVEAL_STAGGER_MAX_MS, top * REVEAL_STAGGER_MS_PER_PX)
+  el.style.setProperty('--distill-reveal-delay', `${Math.round(delay)}ms`)
+}
+
 // Called from content.ts once the scan sweep has actually finished (its onReveal
 // callback) — see REVEAL_ATTR's declaration for why this is a separate step from
 // applying the classes themselves.
 export function revealSimplification(): void {
+  // Read every rect before the attribute flips - once it does, the gated rules
+  // land immediately and would be reading each other's post-reveal layout instead
+  // of the settled pre-reveal one the user was just looking at.
+  const deemphasizeTargets = Array.from(document.querySelectorAll<HTMLElement>(`.${DEEMPHASIZE_CLASS}`))
+  const adTargets = Array.from(document.querySelectorAll<HTMLElement>(`.${AD_HIDDEN_CLASS}`))
+  deemphasizeTargets.forEach(setRevealDelay)
+  adTargets.forEach(setRevealDelay)
+
   document.documentElement.setAttribute(REVEAL_ATTR, 'true')
+
+  window.setTimeout(() => {
+    deemphasizeTargets.forEach((el) => el.style.removeProperty('--distill-reveal-delay'))
+  }, REVEAL_STAGGER_CLEANUP_MS)
+
+  // Ads use the same stagger, but their transition is shorter (0.4s vs 0.6s) and
+  // ends in AD_COLLAPSE_CLASS rather than just sitting at its faded end state - see
+  // the note on that class. scheduleAdCollapse() also fires the (fixed, 0ms-delay)
+  // cleanup timer for a batch found by the mutation observer well after reveal, so
+  // its own delay is capped in with the same REVEAL_STAGGER_MAX_MS margin here.
+  if (adTargets.length) {
+    window.setTimeout(() => {
+      adTargets.forEach((el) => {
+        el.classList.add(AD_COLLAPSE_CLASS)
+        el.style.removeProperty('--distill-reveal-delay')
+      })
+    }, AD_FADE_SETTLE_MS + REVEAL_STAGGER_MAX_MS)
+  }
 }
 
 export function applySimplification(): SimplifyResult {
@@ -1084,16 +1259,60 @@ export function disableProgressiveReveal(): void {
   removeProgressiveControls()
 }
 
+// Instant and synchronous on purpose - this is the safety net content.ts's error
+// path calls after a failed simplify, where the one thing that matters is landing
+// in a coherent state immediately, not a pretty transition. restoreOriginalPageAnimated()
+// below is what every user-initiated "Show original page" actually calls; it ends
+// by calling this same function once the page is already visually back to normal,
+// so the instant swap-back it does here goes unnoticed by then.
 export function restoreOriginalPage(): void {
   stopAdObserver()
   disableProgressiveReveal()
   restoreAllOriginal()
   document.documentElement.removeAttribute(SIMPLIFIED_ATTR)
   document.documentElement.removeAttribute(REVEAL_ATTR)
+  document.documentElement.removeAttribute(RESTORING_ATTR)
   document.documentElement.removeAttribute(REDUCE_MOTION_ATTR)
   document.documentElement.style.removeProperty('--distill-text-scale')
   document.documentElement.style.removeProperty('--distill-spacing')
   document.documentElement.style.removeProperty(BLUR_INTENSITY_PROP)
   document.getElementById(STYLE_TAG_ID)?.remove()
   document.getElementById(RESTORE_BTN_ID)?.remove()
+}
+
+// Distance from the bottom of the viewport, mirroring revealSimplification()'s
+// distance-from-top - see the note on the RESTORING_ATTR rules for why the wave
+// runs the opposite direction on the way out.
+const RESTORE_STAGGER_MAX_MS = 220
+const RESTORE_STAGGER_MS_PER_PX = 0.14
+// The 0.4s transition-duration declared on the RESTORING_ATTR rules, plus the
+// stagger's own cap, plus a small buffer - long enough that every element (even
+// the last one in the wave) has visibly finished before the real teardown runs.
+const RESTORE_SETTLE_MS = 400 + RESTORE_STAGGER_MAX_MS + 80
+
+// The animated counterpart to restoreOriginalPage(), used by every user-initiated
+// "Show original page" (the on-page button, and the sidepanel's DISTILL_RESTORE).
+// Plays the blur/reading-column back to normal in a bottom-up wave and lets the
+// floating button dissolve, then hands off to the plain synchronous restore once
+// that's finished. Falls back to the instant version outright if the page was
+// never actually revealed yet (a click landing in the brief window between the
+// backend responding and the scan sweep's outro) - there's nothing to animate away
+// in that case, and waiting RESTORE_SETTLE_MS anyway would just be a pointless stall.
+export function restoreOriginalPageAnimated(): void {
+  if (!document.documentElement.hasAttribute(REVEAL_ATTR)) {
+    restoreOriginalPage()
+    return
+  }
+
+  const viewportHeight = window.innerHeight
+  document.querySelectorAll<HTMLElement>(`.${DEEMPHASIZE_CLASS}`).forEach((el) => {
+    const top = Math.min(viewportHeight, Math.max(0, el.getBoundingClientRect().top))
+    const delay = Math.min(RESTORE_STAGGER_MAX_MS, (viewportHeight - top) * RESTORE_STAGGER_MS_PER_PX)
+    el.style.setProperty('--distill-reveal-delay', `${Math.round(delay)}ms`)
+  })
+
+  document.getElementById(RESTORE_BTN_ID)?.classList.add(RESTORE_BTN_EXIT_CLASS)
+  document.documentElement.setAttribute(RESTORING_ATTR, 'true')
+
+  window.setTimeout(restoreOriginalPage, RESTORE_SETTLE_MS)
 }

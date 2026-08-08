@@ -21,6 +21,7 @@ import {
   isSpacingIncreased,
   prefilterPage,
   restoreOriginalPage,
+  restoreOriginalPageAnimated,
   revealSimplification,
   setBlurIntensity,
   setIncreaseSpacing,
@@ -237,7 +238,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true
     }
     case 'DISTILL_RESTORE':
-      restoreOriginalPage()
+      restoreOriginalPageAnimated()
       sendResponse({ ok: true })
       return true
     case 'DISTILL_SET_COLOR_REDUCTION': {

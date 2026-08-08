@@ -117,6 +117,45 @@ export function isStickyOrFixed(el: Element): boolean {
   return position === 'fixed' || position === 'sticky'
 }
 
+// Branding for the floating-video-ad players outbrain/taboola-syndicated content
+// commonly injects (Connatix's own markup literally uses a <cnx> tag and "cnx-ui-"
+// class prefix - see isFloatingVideoPromo). Checked before falling back to pure
+// geometry, since a name hit is a stronger signal than shape alone.
+export const FLOATING_MEDIA_PATTERN =
+  /\bcnx\b|connatix|jwplayer|jw-player|vidazoo|floating-player|sticky-video|video-sticky|mini-?player/i
+
+const FLOATING_VIDEO_MAX_WIDTH = 440
+const FLOATING_VIDEO_MAX_HEIGHT = 320
+// How close to an edge counts as "anchored" there, not just coincidentally nearby.
+const FLOATING_VIDEO_CORNER_MARGIN = 48
+
+// The small, fixed/sticky, corner-pinned video player outbrain/taboola/connatix-style
+// content-recommendation widgets float over a page (see the screenshot on the PR/issue
+// this shipped for: a muted autoplaying clip bottom-right, its own play/pause and close
+// controls, sitting on top of "Show original page"). Geometry over naming, like
+// collectSidebarColumns() uses for rails elsewhere - a player like this is rarely
+// classed anything an AD_PATTERN substring match would catch, but "small, pinned to a
+// corner, plays video, isn't the page's own content" is a shape that holds regardless
+// of which vendor's script placed it there.
+export function isFloatingVideoPromo(el: Element): boolean {
+  if (!isStickyOrFixed(el)) return false
+
+  const hasVideo = el.tagName.toLowerCase() === 'video' || !!el.querySelector('video')
+  if (!hasVideo && !FLOATING_MEDIA_PATTERN.test(classNameString(el)) && !el.querySelector('cnx, [class*="cnx" i]')) {
+    return false
+  }
+
+  const rect = el.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return false
+  if (rect.width > FLOATING_VIDEO_MAX_WIDTH || rect.height > FLOATING_VIDEO_MAX_HEIGHT) return false
+
+  const nearRight = window.innerWidth - rect.right <= FLOATING_VIDEO_CORNER_MARGIN
+  const nearLeft = rect.left <= FLOATING_VIDEO_CORNER_MARGIN
+  const nearBottom = window.innerHeight - rect.bottom <= FLOATING_VIDEO_CORNER_MARGIN
+  const nearTop = rect.top <= FLOATING_VIDEO_CORNER_MARGIN
+  return (nearRight || nearLeft) && (nearBottom || nearTop)
+}
+
 function isInteractiveish(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
   if (['a', 'button', 'input', 'select', 'textarea'].includes(tag)) return true
