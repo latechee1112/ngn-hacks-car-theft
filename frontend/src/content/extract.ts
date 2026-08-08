@@ -2,6 +2,7 @@ import type { BoundingBox, ExtractionResult, Landmark, PageBlock } from '../type
 import {
   isAdLike,
   isConsentControlLike,
+  isPrefilteredAd,
   isPopupLike,
   isSidebarLike,
   isStickyOrFixed,
@@ -253,14 +254,19 @@ export function extractPage(): ExtractionResult {
   const blocks: PageBlock[] = []
   const counter = { n: nextIdCounter() }
 
+  // Blocks the local pre-filter already resolved as ads are dropped here rather than
+  // sent and re-judged: the decision is made, and leaving them out keeps the payload
+  // (and the LLM's attention) on the parts that actually need a judgement call. They
+  // are only display:none, so isVisible() would already exclude most of them — this
+  // also covers their still-laid-out descendants.
   document.querySelectorAll(CANDIDATE_SELECTOR).forEach((el) => {
-    if (seen.has(el) || !isVisible(el) || !isExtractable(el)) return
+    if (seen.has(el) || !isVisible(el) || !isExtractable(el) || isPrefilteredAd(el)) return
     seen.add(el)
     blocks.push(buildBlock(el, counter))
   })
 
   findLinkGroups().forEach((el) => {
-    if (seen.has(el) || !isVisible(el)) return
+    if (seen.has(el) || !isVisible(el) || isPrefilteredAd(el)) return
     seen.add(el)
     blocks.push(buildBlock(el, counter, { repeatedLink: true }))
   })

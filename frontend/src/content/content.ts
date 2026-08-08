@@ -10,12 +10,14 @@ import {
   canUseProgressiveReveal,
   disableProgressiveReveal,
   enableProgressiveReveal,
+  hiddenAdCount,
   INCREASED_SPACING_MULTIPLIER,
   isColorVariationReduced,
   isProgressiveRevealOn,
   isReduceMotionOn,
   isSimplificationActive,
   isSpacingIncreased,
+  prefilterAds,
   restoreOriginalPage,
   setBlurIntensity,
   setIncreaseSpacing,
@@ -73,9 +75,22 @@ function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendR
   })
 }
 
-// Backend-driven simplification is the primary path; the local heuristic (no LLM,
-// no task-awareness) is only a fallback for when the backend is unreachable.
+// Two stages, in this order:
+//
+//   1. Local pre-filter — the unambiguous stuff (a "Promoted"/"Sponsored" badge, an
+//      ad-network iframe, a container literally named "ad"/"sponsor"). No model needed
+//      to call those, so they are hidden immediately, before anything is sent anywhere.
+//   2. Backend analysis — runs on the *remaining* page, since extractPage() skips
+//      whatever stage 1 already resolved. Its judgement is spent on the genuinely
+//      ambiguous blocks, not on re-deciding obvious ads.
+//
+// Backend-driven simplification is the primary path for stage 2; the local heuristic
+// (no LLM, no task-awareness) is only a fallback for when the backend is unreachable.
+// Stage 1 stands on its own either way — if the backend is down, the ads still go.
 async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResult> {
+  const prefiltered = prefilterAds()
+  console.log(`[Distill] pre-filter hid ${prefiltered} ad/sponsored block(s) before analysis`)
+
   const result = await requestBackendAnalysis(profileFor(settings))
 
   let outcome: SimplifyResult
@@ -161,6 +176,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'DISTILL_STATUS':
       sendResponse({
         simplified: isSimplificationActive(),
+        adsHidden: hiddenAdCount(),
         colorReductionAvailable: canReduceColorVariation(),
         colorReductionActive: isColorVariationReduced(),
         progressiveRevealAvailable: canUseProgressiveReveal(),

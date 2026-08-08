@@ -1,5 +1,14 @@
 import type { BlockAction, LayoutSettings } from '../types/analysis'
-import { isAdLike, isPopupLike, isProtectedFromSimplification, isStickyOrFixed, isVisible } from './dom-heuristics'
+import {
+  AD_HIDDEN_CLASS,
+  isAdLike,
+  isAdNetworkFrame,
+  isPopupLike,
+  isProtectedFromSimplification,
+  isSponsoredLabel,
+  isStickyOrFixed,
+  isVisible,
+} from './dom-heuristics'
 import { FF_ID_ATTR } from './extract'
 import { restoreAllOriginal, saveOriginal } from './originalState'
 
@@ -9,7 +18,8 @@ const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
 const DEEMPHASIZE_CLASS = 'distill-deemphasize'
-const UNSTICK_CLASS = 'distill-unstick'
+const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
+const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
 const NEUTRAL_COLOR = '#1a1a1a'
 const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
@@ -32,6 +42,7 @@ const NOISE_SELECTOR =
 export interface SimplifyResult {
   primaryFound: boolean
   deemphasizedCount: number
+  adsHidden: number
 }
 
 function findPrimaryContent(): Element | null {
@@ -83,6 +94,135 @@ function collectNoiseTargets(primary: Element | null): Element[] {
   })
 
   return pruneNested(Array.from(targets))
+}
+
+// --- Ads and sponsored content -------------------------------------------
+// Ads are removed from view outright (display:none) rather than dimmed like other
+// noise: a faded ad is still an ad competing for attention. Nothing is deleted —
+// this is the same class-toggle + saveOriginal machinery as everything else, so
+// restoreOriginalPage() brings them all back.
+
+// Deliberately loose — every hit is re-checked with isAdLike(), which is the part
+// that actually decides. Cheap to over-select here, expensive to miss.
+const AD_CANDIDATE_SELECTOR =
+  '[class*="ad" i], [id*="ad" i], [class*="sponsor" i], [id*="sponsor" i], ' +
+  '[class*="promot" i], [id*="promot" i], [data-testid*="ad" i], [data-testid*="promot" i], ' +
+  '[aria-label*="advertisement" i], [aria-label*="sponsored" i], ' +
+  '[data-ad-client], [data-ad-slot], [data-ad-unit], ins, iframe, embed'
+
+// Anything text-bearing small enough to be a badge. Excludes the structural tags a
+// whole post card uses, so the walk-up below starts from the label, not the card.
+const SPONSORED_LABEL_SELECTOR = 'span, div, p, a, small, em, strong, b, h4, h5, h6, label, li'
+
+const CARD_TAGS = new Set(['article', 'li', 'section'])
+const MAX_CARD_WALK_DEPTH = 8
+// A container holding this much text is a feed/page region, not a single ad card.
+const MAX_CARD_TEXT_LENGTH = 4000
+
+// Three or more same-tag children means `parent` is the list and `child` is one entry —
+// so `child` is the whole ad card and climbing any further would take out the feed.
+function isFeedContainer(parent: Element, child: Element): boolean {
+  return Array.from(parent.children).filter((c) => c.tagName === child.tagName).length >= 3
+}
+
+// A "Promoted" badge is a few nodes deep inside the post it labels; hiding just the
+// badge would leave the ad itself sitting there. Climb to the post card and stop
+// short of the feed that holds it.
+function findAdCard(label: Element, primary: Element | null): Element {
+  let el: Element = label
+  for (let depth = 0; depth < MAX_CARD_WALK_DEPTH; depth++) {
+    const parent = el.parentElement
+    if (!parent || parent === document.body || parent === document.documentElement) break
+    if (parent === primary || parent.tagName.toLowerCase() === 'main') break
+    if (isProtectedFromSimplification(parent)) break
+    if ((parent.textContent || '').length > MAX_CARD_TEXT_LENGTH) break
+    if (isFeedContainer(parent, el)) break
+    if (CARD_TAGS.has(parent.tagName.toLowerCase()) || parent.getAttribute('role') === 'article' || isAdLike(parent)) {
+      return parent
+    }
+    el = parent
+  }
+  return el
+}
+
+function collectAdTargets(primary: Element | null): Element[] {
+  const targets = new Set<Element>()
+
+  const consider = (el: Element) => {
+    if (isProtectedFromSimplification(el)) return
+    // The primary content itself is never an ad, and hiding an ancestor of it
+    // would blank the page.
+    if (primary && (el === primary || el.contains(primary))) return
+    if (el === document.body || el === document.documentElement) return
+    targets.add(el)
+  }
+
+  document.querySelectorAll(AD_CANDIDATE_SELECTOR).forEach((el) => {
+    if (isAdLike(el) || isAdNetworkFrame(el)) consider(el)
+  })
+
+  document.querySelectorAll(SPONSORED_LABEL_SELECTOR).forEach((el) => {
+    if (!isSponsoredLabel(el)) return
+    consider(findAdCard(el, primary))
+  })
+
+  return pruneNested(Array.from(targets))
+}
+
+// Stage 1 of simplification, run by content.ts BEFORE the page is extracted and sent
+// to the backend. Everything unambiguous — "Promoted"/"Sponsored" badges, ad-network
+// frames, ad-named containers — is resolved locally and instantly: the user sees the
+// clutter go immediately instead of waiting on a network round-trip, and extractPage()
+// then skips these blocks, so the backend only spends its judgement on the genuinely
+// ambiguous rest of the page.
+export function prefilterAds(): number {
+  injectGlobalStyle()
+  const count = hideAds(getPrimaryElement())
+  startAdObserver()
+  return count
+}
+
+function hideAds(primary: Element | null): number {
+  const targets = collectAdTargets(primary)
+  targets.forEach((el) => {
+    saveOriginal(el)
+    el.classList.add(AD_HIDDEN_CLASS)
+  })
+  return targets.length
+}
+
+// Feeds stream new promoted posts in as you scroll, so a one-shot sweep only holds
+// until the next page of results. Re-runs the sweep on DOM insertions, coalesced to
+// one pass per frame. Only childList is observed, so our own class changes can't
+// re-trigger it.
+let adObserver: MutationObserver | null = null
+
+function startAdObserver(): void {
+  if (adObserver) return
+  let scheduled = false
+  adObserver = new MutationObserver(() => {
+    if (scheduled) return
+    scheduled = true
+    requestAnimationFrame(() => {
+      scheduled = false
+      if (isSimplificationActive()) hideAds(getPrimaryElement())
+    })
+  })
+  adObserver.observe(document.body, { childList: true, subtree: true })
+}
+
+function stopAdObserver(): void {
+  adObserver?.disconnect()
+  adObserver = null
+}
+
+// Sticky and fixed need different replacements to stay layout-neutral, and only the
+// computed style knows which one this is — so the choice is made here, in JS, rather
+// than by one blanket CSS rule.
+function unstick(el: Element): void {
+  const position = getComputedStyle(el).position
+  if (position === 'fixed') el.classList.add(UNSTICK_FIXED_CLASS)
+  else if (position === 'sticky') el.classList.add(UNSTICK_STICKY_CLASS)
 }
 
 function pauseAutoplayMedia(): void {
@@ -140,8 +280,20 @@ html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
   opacity: 1 !important;
   filter: none !important;
 }
-html[${SIMPLIFIED_ATTR}] .${UNSTICK_CLASS} {
-  position: static !important;
+/* Un-sticking must not change layout. position:static would drop a fixed header into
+   normal flow, pushing everything below it down — on a site whose hero sizes itself
+   against that header, the hero visibly grows by exactly the header's height.
+   absolute/relative stop the element from following the scroll while it keeps the
+   exact box it already had: fixed elements stay out of flow, sticky ones keep the
+   space flow already reserved for them. */
+html[${SIMPLIFIED_ATTR}] .${UNSTICK_FIXED_CLASS} {
+  position: absolute !important;
+  max-width: 100% !important;
+}
+html[${SIMPLIFIED_ATTR}] .${UNSTICK_STICKY_CLASS} {
+  position: relative !important;
+  top: auto !important;
+  bottom: auto !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
@@ -173,6 +325,13 @@ html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):
   outline-offset: 2px;
 }
 html[${SIMPLIFIED_ATTR}] .${SECTION_HIDDEN_CLASS} {
+  display: none !important;
+}
+/* Deliberately NOT gated on [${SIMPLIFIED_ATTR}]: the ad pre-filter runs before the
+   backend analysis, so this has to bite while the page is still "not simplified yet".
+   Swap display:none for filter: blur(6px) + pointer-events:none to keep filtered
+   units visible-but-muted instead of gone. */
+.${AD_HIDDEN_CLASS} {
   display: none !important;
 }
 #${PROGRESSIVE_CONTROLS_ID} {
@@ -238,6 +397,10 @@ function ensureRestoreButton(): void {
   document.body.appendChild(btn)
 }
 
+export function hiddenAdCount(): number {
+  return document.querySelectorAll(`.${AD_HIDDEN_CLASS}`).length
+}
+
 export function isSimplificationActive(): boolean {
   return document.documentElement.getAttribute(SIMPLIFIED_ATTR) === 'true'
 }
@@ -247,6 +410,7 @@ export function applySimplification(): SimplifyResult {
     return {
       primaryFound: !!document.querySelector(`.${PRIMARY_CLASS}`),
       deemphasizedCount: document.querySelectorAll(`.${DEEMPHASIZE_CLASS}`).length,
+      adsHidden: document.querySelectorAll(`.${AD_HIDDEN_CLASS}`).length,
     }
   }
 
@@ -261,15 +425,18 @@ export function applySimplification(): SimplifyResult {
   targets.forEach((el) => {
     saveOriginal(el)
     el.classList.add(DEEMPHASIZE_CLASS)
-    if (isStickyOrFixed(el)) el.classList.add(UNSTICK_CLASS)
+    unstick(el)
   })
+
+  const adsHidden = hideAds(primary)
 
   pauseAutoplayMedia()
   injectGlobalStyle()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
+  startAdObserver()
 
-  return { primaryFound: !!primary, deemphasizedCount: targets.length }
+  return { primaryFound: !!primary, deemphasizedCount: targets.length, adsHidden }
 }
 
 function findByBlockId(blockId: string): Element | null {
@@ -286,6 +453,7 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
     return {
       primaryFound: !!document.querySelector(`.${PRIMARY_CLASS}`),
       deemphasizedCount: document.querySelectorAll(`.${DEEMPHASIZE_CLASS}`).length,
+      adsHidden: document.querySelectorAll(`.${AD_HIDDEN_CLASS}`).length,
     }
   }
 
@@ -304,7 +472,7 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
         break
       case 'deemphasize':
         el.classList.add(DEEMPHASIZE_CLASS)
-        if (isStickyOrFixed(el)) el.classList.add(UNSTICK_CLASS)
+        unstick(el)
         deemphasizedCount++
         break
       case 'collapse':
@@ -322,16 +490,22 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
   document.documentElement.style.setProperty('--distill-spacing', String(layout.spacingMultiplier))
   document.documentElement.toggleAttribute(REDUCE_MOTION_ATTR, layout.reduceMotion)
 
+  // Runs regardless of what the backend returned: ads are a client-side call the
+  // extraction can't always see (cross-origin frames, feed units injected after
+  // extraction), so this pass is not conditional on any action list.
+  const adsHidden = hideAds(document.querySelector(`.${PRIMARY_CLASS}`))
+
   pauseAutoplayMedia()
   injectGlobalStyle()
   ensureRestoreButton()
   document.documentElement.setAttribute(SIMPLIFIED_ATTR, 'true')
+  startAdObserver()
 
   if (layout.progressiveReveal && primaryFound) {
     enableProgressiveReveal()
   }
 
-  return { primaryFound, deemphasizedCount }
+  return { primaryFound, deemphasizedCount, adsHidden }
 }
 
 function getPrimaryElement(): Element | null {
@@ -648,6 +822,7 @@ export function disableProgressiveReveal(): void {
 }
 
 export function restoreOriginalPage(): void {
+  stopAdObserver()
   disableProgressiveReveal()
   restoreAllOriginal()
   document.documentElement.removeAttribute(SIMPLIFIED_ATTR)
