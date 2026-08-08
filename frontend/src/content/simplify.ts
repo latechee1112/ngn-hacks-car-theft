@@ -325,26 +325,24 @@ function deemphasizeSecondary(primary: Element | null, spared: Element[] = []): 
 // clutter go immediately instead of waiting on a network round-trip, and extractPage()
 // then skips these blocks, so the backend only spends its judgement on the genuinely
 // ambiguous rest of the page.
+//
+// Ads only. This pass used to blur secondary content too, which meant a guessed blur
+// landed while the scan animation was still running and was then revised a second or
+// two later when the analysis came back — the user watched the page shift under a
+// sweep that is supposed to mean "still deciding". Nothing is blurred until the
+// analysis is in; hiding an ad is a removal, not a blur, and nothing later revises it,
+// so that part stays immediate.
 export interface PrefilterResult {
   adsHidden: number
-  deemphasized: number
 }
 
 export function prefilterPage(): PrefilterResult {
   injectGlobalStyle()
   // Nothing is marked primary yet (the backend hasn't answered), so the local
-  // article detector supplies the "don't touch this" region for both passes.
-  const primary = findPrimaryContent()
-  const adsHidden = hideAds(primary)
-  // On a hand-tuned page, no blur at all during the loading phase: the guessed
-  // pre-filter blur would land first, then get corrected a second or two later when
-  // the analysis returns, and what the user sees is the page flickering between two
-  // different blurs. Deferring it means the page sits sharp while the scan runs and
-  // blurs once, in its final state. Ads still go immediately — that's a removal, not
-  // a blur, and nothing later revises it.
-  const deemphasized = findSiteRule() ? 0 : deemphasizeSecondary(primary)
+  // article detector supplies the "don't touch this" region.
+  const adsHidden = hideAds(findPrimaryContent())
   startAdObserver()
-  return { adsHidden, deemphasized }
+  return { adsHidden }
 }
 
 function hideAds(primary: Element | null, roots?: Element[]): number {
@@ -683,6 +681,9 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
 
   let primaryFound = false
   let deemphasizedCount = 0
+  // Blocks the backend explicitly wants left alone. Collected so the shape-based
+  // secondary sweep below can't overrule the model that actually read the page.
+  const spared: Element[] = []
 
   actions.forEach((action) => {
     const el = findByBlockId(action.blockId)
@@ -690,12 +691,9 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
     saveOriginal(el)
 
     switch (action.action) {
-      // emphasize/keep also clear any blur the local pre-filter put on this block:
-      // the pre-filter guesses from shape alone, the backend actually read the page,
-      // so where they disagree the backend wins.
       case 'emphasize':
-        el.classList.remove(DEEMPHASIZE_CLASS)
         markPrimary(el)
+        spared.push(el)
         primaryFound = true
         break
       case 'deemphasize':
@@ -709,7 +707,7 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
         el.classList.add(SECTION_HIDDEN_CLASS)
         break
       case 'keep':
-        el.classList.remove(DEEMPHASIZE_CLASS)
+        spared.push(el)
         break
       default:
         break
@@ -723,7 +721,14 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
   // Runs regardless of what the backend returned: ads are a client-side call the
   // extraction can't always see (cross-origin frames, feed units injected after
   // extraction), so this pass is not conditional on any action list.
-  const adsHidden = hideAds(document.querySelector(`.${PRIMARY_CLASS}`))
+  const primary = getPrimaryElement() ?? findPrimaryContent()
+  const adsHidden = hideAds(primary)
+
+  // The obvious-secondary sweep (rails, footers, "related" modules) used to run in the
+  // pre-filter, before the analysis. It happens here now so that nothing blurs while
+  // the scan animation is still playing — and since it lands after the actions, it is
+  // told which blocks the backend spared so it can't overrule them.
+  deemphasizedCount += deemphasizeSecondary(primary, spared)
 
   pauseAutoplayMedia()
   injectGlobalStyle()
