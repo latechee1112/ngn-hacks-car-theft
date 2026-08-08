@@ -54,7 +54,8 @@ const SETTINGS_KEY = 'distillSettings'
 interface StoredSettings {
   intensity: number // 1-100, as shown on the slider
   reduceMotion: boolean
-  increaseSpacing: boolean
+  largerText: boolean
+  reduceColorVariation: boolean
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
@@ -67,7 +68,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
   // not actual accessibility. Defaulting it on suppressed the scan-sweep
   // animation for every user who never touched this toggle.
   reduceMotion: false,
-  increaseSpacing: true,
+  largerText: true,
+  reduceColorVariation: false,
 }
 
 async function loadSettings(): Promise<StoredSettings> {
@@ -81,7 +83,6 @@ async function loadSettings(): Promise<StoredSettings> {
 
 function App() {
   const [simplified, setSimplified] = useState(false)
-  const [colorReductionAvailable, setColorReductionAvailable] = useState(false)
   const [colorReductionActive, setColorReductionActive] = useState(false)
   const [progressiveRevealAvailable, setProgressiveRevealAvailable] = useState(false)
   const [progressiveRevealActive, setProgressiveRevealActive] = useState(false)
@@ -100,7 +101,7 @@ function App() {
 
   const [intensity, setIntensity] = useState(DEFAULT_SETTINGS.intensity)
   const [reduceMotion, setReduceMotion] = useState(DEFAULT_SETTINGS.reduceMotion)
-  const [increaseSpacing, setIncreaseSpacing] = useState(DEFAULT_SETTINGS.increaseSpacing)
+  const [largerText, setLargerText] = useState(DEFAULT_SETTINGS.largerText)
   // Guards the persist effect below: without it the first render would write
   // the defaults over whatever was stored before load() resolves.
   const [settingsLoaded, setSettingsLoaded] = useState(false)
@@ -147,27 +148,25 @@ function App() {
       if (!tabId) return
       const response = (await sendToTab(tabId, { type: 'DISTILL_STATUS' })) as {
         simplified: boolean
-        colorReductionAvailable: boolean
         colorReductionActive: boolean
         progressiveRevealAvailable: boolean
         progressiveRevealActive: boolean
         reduceMotionActive: boolean
-        spacingIncreased: boolean
+        largerTextActive: boolean
         adsHidden: number
         blurIntensity: number
       }
       setSimplified(response.simplified)
       setAdsHidden(response.adsHidden ?? 0)
-      setColorReductionAvailable(response.colorReductionAvailable)
-      setColorReductionActive(response.colorReductionActive)
       setProgressiveRevealAvailable(response.progressiveRevealAvailable)
       setProgressiveRevealActive(response.progressiveRevealActive)
-      // Only trust the page for these two while it is actually simplified —
+      // Only trust the page for these live preferences while it is actually simplified —
       // an unsimplified page has both cleared, which says nothing about what
       // the user prefers next time.
       if (response.simplified) {
         setReduceMotion(response.reduceMotionActive)
-        setIncreaseSpacing(response.spacingIncreased)
+        setLargerText(response.largerTextActive)
+        setColorReductionActive(response.colorReductionActive)
         // The live page is the source of truth for blur while it is simplified,
         // so reopening the panel shows the blur actually on screen.
         if (Number.isFinite(response.blurIntensity)) {
@@ -176,8 +175,6 @@ function App() {
       }
     } catch {
       setSimplified(false)
-      setColorReductionAvailable(false)
-      setColorReductionActive(false)
       setProgressiveRevealAvailable(false)
       setProgressiveRevealActive(false)
     }
@@ -185,12 +182,13 @@ function App() {
 
   useEffect(() => {
     // Sequential on purpose: stored preferences load first, then refreshStatus
-    // may override the two live toggles from the actual page state.
+    // may override the live toggles from the actual page state.
     async function init() {
       const stored = await loadSettings()
       setIntensity(stored.intensity)
       setReduceMotion(stored.reduceMotion)
-      setIncreaseSpacing(stored.increaseSpacing)
+      setLargerText(stored.largerText)
+      setColorReductionActive(stored.reduceColorVariation)
       await refreshStatus()
       await checkCalibrationStatus()
       setSettingsLoaded(true)
@@ -201,9 +199,9 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) return
     chrome.storage.local
-      .set({ [SETTINGS_KEY]: { intensity, reduceMotion, increaseSpacing } })
+      .set({ [SETTINGS_KEY]: { intensity, reduceMotion, largerText, reduceColorVariation: colorReductionActive } })
       .catch(() => {})
-  }, [settingsLoaded, intensity, reduceMotion, increaseSpacing])
+  }, [settingsLoaded, intensity, reduceMotion, largerText, colorReductionActive])
 
   async function simplifyPage() {
     setError('')
@@ -220,7 +218,8 @@ function App() {
           // Slider is 1-100; the backend's VisualProfile wants 0.0-1.0.
           simplificationStrength: intensity / 100,
           reduceMotion,
-          increaseSpacing,
+          largerText,
+          reduceColorVariation: colorReductionActive,
         },
       })
       // The content script rolls the page back before reporting a failure, so the
@@ -232,7 +231,6 @@ function App() {
       }
       setSimplified(true)
       setAdsHidden(response.adsHidden ?? 0)
-      setColorReductionAvailable(response.primaryFound)
       setProgressiveRevealAvailable(response.primaryFound)
     } catch (err) {
       setError(`Couldn't simplify this page: ${String(err)}`)
@@ -251,8 +249,6 @@ function App() {
       }
       await sendToTab(tabId, { type: 'DISTILL_RESTORE' })
       setSimplified(false)
-      setColorReductionAvailable(false)
-      setColorReductionActive(false)
       setProgressiveRevealAvailable(false)
       setProgressiveRevealActive(false)
       setAdsHidden(0)
@@ -303,12 +299,12 @@ function App() {
     }
   }
 
-  // Reduce motion and Increase spacing are CSS switches, so they apply to an
+  // Reduce motion and Larger text are CSS switches, so they apply to an
   // already-simplified page immediately. When nothing is simplified yet the
   // content script reports applied:false and we just keep the preference —
   // it ships with the next Activate.
   async function pushLayoutPreference(
-    type: 'DISTILL_SET_REDUCE_MOTION' | 'DISTILL_SET_SPACING',
+    type: 'DISTILL_SET_REDUCE_MOTION' | 'DISTILL_SET_LARGER_TEXT',
     enabled: boolean,
   ) {
     setError('')
@@ -327,9 +323,9 @@ function App() {
     pushLayoutPreference('DISTILL_SET_REDUCE_MOTION', enabled)
   }
 
-  function toggleIncreaseSpacing(enabled: boolean) {
-    setIncreaseSpacing(enabled)
-    pushLayoutPreference('DISTILL_SET_SPACING', enabled)
+  function toggleLargerText(enabled: boolean) {
+    setLargerText(enabled)
+    pushLayoutPreference('DISTILL_SET_LARGER_TEXT', enabled)
   }
 
   // Blur is a CSS variable on the page, so a drag repaints immediately — no
@@ -350,6 +346,7 @@ function App() {
 
   async function toggleColorReduction(enabled: boolean) {
     setError('')
+    setColorReductionActive(enabled)
     try {
       const tabId = await getActiveTabId()
       if (!tabId) {
@@ -360,9 +357,15 @@ function App() {
         type: 'DISTILL_SET_COLOR_REDUCTION',
         enabled,
       })) as { applied: boolean; active: boolean }
-      setColorReductionActive(response.active)
+      // An unsimplified page reports applied:false; keep the saved preference
+      // so it is applied by the next Simplify Current Page action.
+      if (response.applied) setColorReductionActive(response.active)
     } catch (err) {
-      setError(`Couldn't toggle color reduction: ${String(err)}`)
+      // Restricted tabs cannot host the content script. The preference is still
+      // saved and will apply on the next page that can be simplified.
+      if (!/cannot be scripted|chrome:\/\/|extension:\/\//i.test(String(err))) {
+        setError(`Couldn't apply color reduction to this page: ${String(err)}`)
+      }
     }
   }
 
@@ -537,10 +540,10 @@ function App() {
                 className="flex cursor-pointer items-center justify-between border-b border-outline px-4 py-3 transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-on-surface-variant focus-within:ring-inset"
               >
                 <div className="flex items-center gap-3">
-                  <Icon name="spacing" className="text-on-surface-variant" />
-                  <span className="text-body text-on-surface">Increase spacing</span>
+                  <Icon name="textSize" className="text-on-surface-variant" />
+                  <span className="text-body text-on-surface">Larger text</span>
                 </div>
-                <ToggleSwitch checked={increaseSpacing} onChange={toggleIncreaseSpacing} />
+                <ToggleSwitch checked={largerText} onChange={toggleLargerText} />
               </label>
               <label
                 className="flex cursor-pointer items-center justify-between border-b border-outline px-4 py-3 transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-on-surface-variant focus-within:ring-inset"
@@ -564,7 +567,6 @@ function App() {
                 </div>
                 <ToggleSwitch
                   checked={colorReductionActive}
-                  disabled={!colorReductionAvailable}
                   onChange={toggleColorReduction}
                 />
               </label>

@@ -46,7 +46,6 @@ const AD_FADE_SETTLE_MS = 500
 const PRIMARY_CLASS = 'distill-primary-content'
 const READING_COLUMN_CLASS = 'distill-reading-column'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
-const NEUTRAL_COLOR = '#1a1a1a'
 const PROGRESSIVE_CONTROLS_ID = 'distill-progressive-controls'
 const SECTION_HEADING_SELECTOR = /^h[23]$/i
 const BLUR_INTENSITY_PROP = '--distill-blur-intensity'
@@ -514,6 +513,12 @@ html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${READING_COLUMN_CLASS} h3 {
   margin-top: 1.4em !important;
   margin-bottom: 0.6em !important;
 }
+/* Every target stores a pixel value measured before any target is changed. That
+   makes the increase visible on normal body copy as well as captions, while
+   avoiding compounded em/rem scaling in nested markup. */
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}][${MIN_TEXT_ATTR}] .${MIN_TEXT_CLASS} {
+  font-size: var(${LARGER_TEXT_SIZE_PROP}) !important;
+}
 /* Everything that visibly reshapes the page - this included, see the ad rule below -
    waits for [${REVEAL_ATTR}]: deemphasizeSecondary() and hideAds() both run well before
    the scan sweep has actually finished (the sweep is a translucent wash, not an opaque
@@ -617,9 +622,12 @@ html[${REVEAL_ATTR}] .${UNSTICK_STICKY_CLASS} {
   top: auto !important;
   bottom: auto !important;
 }
-html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
-html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
-  color: ${NEUTRAL_COLOR} !important;
+/* Desaturating the rendered primary region reduces every source of color
+   variation (text, backgrounds, borders and media) while preserving each
+   site's existing luminance and contrast. The previous fixed text color was
+   nearly invisible on dark pages and left most of the page's color untouched. */
+html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${NEUTRAL_COLOR_CLASS} {
+  filter: grayscale(100%) !important;
 }
 html[${SIMPLIFIED_ATTR}][${REVEAL_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} a:not(form a):not(button a) {
   text-decoration: underline !important;
@@ -801,6 +809,13 @@ export function revealSimplification(): void {
 
   document.documentElement.setAttribute(REVEAL_ATTR, 'true')
 
+  // Layout rules (including the backend's reading-column text scale) are gated
+  // on REVEAL_ATTR, so the pre-reveal pass cannot know the sizes users will
+  // actually see. Re-measure synchronously now that those rules are active;
+  // setLargerText() clears its old targets before reading, then applies a true
+  // 20% increase over the final simplified sizes.
+  if (isLargerTextOn()) setLargerText(true)
+
   window.setTimeout(() => {
     deemphasizeTargets.forEach((el) => el.style.removeProperty('--distill-reveal-delay'))
   }, REVEAL_STAGGER_CLEANUP_MS)
@@ -950,43 +965,60 @@ function getPrimaryElement(): Element | null {
   return document.querySelector(`.${PRIMARY_CLASS}`)
 }
 
+function getPrimaryElements(): Element[] {
+  return Array.from(document.querySelectorAll(`.${PRIMARY_CLASS}`))
+}
+
+function getColorReductionTargets(): Element[] {
+  const primary = getPrimaryElements()
+  if (primary.length > 0) return primary
+
+  // Filtering <body> itself changes the containing block for position:fixed
+  // descendants on some sites. Filtering its page-level children gives the
+  // same rendered desaturation without moving sticky chrome or Distill's own
+  // controls.
+  const pageChildren = Array.from(document.body.children).filter(
+    (el) => el.id !== RESTORE_BTN_ID && el.id !== PROGRESSIVE_CONTROLS_ID,
+  )
+  return pageChildren.length > 0 ? pageChildren : [document.body]
+}
+
 export function canReduceColorVariation(): boolean {
-  return isSimplificationActive() && !!getPrimaryElement()
+  return isSimplificationActive()
 }
 
 export function isColorVariationReduced(): boolean {
-  return getPrimaryElement()?.classList.contains(NEUTRAL_COLOR_CLASS) ?? false
+  return isSimplificationActive() && getColorReductionTargets().every((el) => el.classList.contains(NEUTRAL_COLOR_CLASS))
 }
 
-// Toggles a single neutral text/link color across the simplified primary region only.
-// Reuses the same snapshot-before-mutating + class-toggle pattern as the noise dimming
-// above, so restoreOriginalPage() undoes this along with everything else.
+// Toggles desaturation across every primary region. There can be more than one
+// when the backend emphasizes several blocks, so changing only querySelector's
+// first match made the control appear ineffective on the rest of the content.
+// Pages without a detected primary region use the body, keeping the preference
+// useful for feeds, dashboards and search pages too.
 export function setReduceColorVariation(enabled: boolean): boolean {
-  const primary = getPrimaryElement()
-  if (!isSimplificationActive() || !primary) return false
+  if (!isSimplificationActive()) return false
+  const targets = getColorReductionTargets()
 
-  saveOriginal(primary)
-  primary.classList.toggle(NEUTRAL_COLOR_CLASS, enabled)
+  targets.forEach((el) => {
+    saveOriginal(el)
+    el.classList.toggle(NEUTRAL_COLOR_CLASS, enabled)
+  })
   return true
 }
 
 // --- Live layout preferences ----------------------------------------------
-// Reduce motion and increased spacing are user toggles, not analysis results.
-// Both are pure CSS switches on <html> (the rules already exist in
-// injectGlobalStyle), so they apply instantly to an already-simplified page and
-// need no snapshot — restoreOriginalPage() already clears both.
+// Reduce motion and larger text are user toggles, not analysis results. Both
+// apply instantly to an already-simplified page and need no snapshot beyond
+// what setLargerText() already takes per-element — restoreOriginalPage()
+// clears both along with everything else.
 //
 // These deliberately win over the backend's suggested `layout` block: an
 // explicit toggle is stronger intent than a profile-derived default.
 
-// Matches DEFAULT_PROFILE.spacingMultiplier. The backend's VisualProfile
-// constrains spacingMultiplier to 1.0–3.0, so "off" is 1, never 0.
-export const INCREASED_SPACING_MULTIPLIER = 1.4
-const BASE_SPACING_MULTIPLIER = 1
-
 export interface LayoutPreferences {
   reduceMotion: boolean
-  increaseSpacing: boolean
+  largerText: boolean
 }
 
 export function isReduceMotionOn(): boolean {
@@ -1001,23 +1033,85 @@ export function setReduceMotion(enabled: boolean): boolean {
   return true
 }
 
-export function isSpacingIncreased(): boolean {
-  const raw = document.documentElement.style.getPropertyValue('--distill-spacing')
-  return Number.parseFloat(raw) > BASE_SPACING_MULTIPLIER
+// A noticeable but restrained increase. Each target receives an absolute pixel
+// value derived from its computed size so explicit site font sizes also respond.
+const LARGER_TEXT_SCALE = 1.2
+const MIN_TEXT_CLASS = 'distill-min-text-size'
+const MIN_TEXT_ATTR = 'data-distill-larger-text'
+const LARGER_TEXT_SIZE_PROP = '--distill-larger-font-size'
+// Bounds the scan on a very large document, same reasoning as COLUMN_SCAN_BUDGET.
+const MIN_TEXT_SCAN_BUDGET = 6000
+
+// True only for elements with their own direct, non-whitespace text - the leaves
+// worth measuring. A wrapping <div> around ten paragraphs inherits whatever size
+// its children set; touching it too would be redundant at best and, since its
+// own computed size is usually the *default* browser size rather than whatever
+// small size its children actually render at, could floor text that was already
+// fine.
+function hasDirectText(el: Element): boolean {
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE && (node.textContent || '').trim()) return true
+  }
+  return false
 }
 
-export function setIncreaseSpacing(enabled: boolean): boolean {
+interface LargerTextTarget {
+  element: Element
+  fontSize: number
+}
+
+// Scoped to all primary content regions. Read every computed size before
+// changing any element so nested em/rem text cannot compound as the scan runs.
+function collectLargerTextTargets(): LargerTextTarget[] {
+  const primary = getPrimaryElements()
+  const roots = primary.length > 0 ? primary.filter((root) => !root.parentElement?.closest(`.${PRIMARY_CLASS}`)) : [document.body]
+  const candidates = new Set<Element>()
+  for (const root of roots) {
+    candidates.add(root)
+    root.querySelectorAll('*').forEach((el) => candidates.add(el))
+  }
+
+  const targets: LargerTextTarget[] = []
+  for (const el of candidates) {
+    if (targets.length >= MIN_TEXT_SCAN_BUDGET) break
+    if (!hasDirectText(el) || isProtectedFromSimplification(el)) continue
+    const fontSize = Number.parseFloat(getComputedStyle(el).fontSize)
+    if (Number.isFinite(fontSize) && fontSize > 0) targets.push({ element: el, fontSize })
+  }
+  return targets
+}
+
+export function isLargerTextOn(): boolean {
+  return document.documentElement.hasAttribute(MIN_TEXT_ATTR)
+}
+
+function clearLargerTextTargets(): void {
+  document.querySelectorAll<HTMLElement>(`.${MIN_TEXT_CLASS}`).forEach((el) => {
+    el.classList.remove(MIN_TEXT_CLASS)
+    el.style.removeProperty(LARGER_TEXT_SIZE_PROP)
+  })
+}
+
+// Re-scans from scratch every call so toggling off then back on, or reflow after
+// the first pass, never leaves stale sizes or targets.
+export function setLargerText(enabled: boolean): boolean {
   if (!isSimplificationActive()) return false
-  document.documentElement.style.setProperty(
-    '--distill-spacing',
-    String(enabled ? INCREASED_SPACING_MULTIPLIER : BASE_SPACING_MULTIPLIER),
-  )
+  clearLargerTextTargets()
+  document.documentElement.toggleAttribute(MIN_TEXT_ATTR, enabled)
+  if (enabled) {
+    collectLargerTextTargets().forEach(({ element, fontSize }) => {
+      saveOriginal(element)
+      const el = element as HTMLElement
+      el.style.setProperty(LARGER_TEXT_SIZE_PROP, `${Math.round(fontSize * LARGER_TEXT_SCALE * 100) / 100}px`)
+      el.classList.add(MIN_TEXT_CLASS)
+    })
+  }
   return true
 }
 
 export function applyLayoutPreferences(prefs: LayoutPreferences): void {
   setReduceMotion(prefs.reduceMotion)
-  setIncreaseSpacing(prefs.increaseSpacing)
+  setLargerText(prefs.largerText)
 }
 
 // --- Deemphasis blur intensity ---------------------------------------------
@@ -1273,6 +1367,7 @@ export function restoreOriginalPage(): void {
   document.documentElement.removeAttribute(REVEAL_ATTR)
   document.documentElement.removeAttribute(RESTORING_ATTR)
   document.documentElement.removeAttribute(REDUCE_MOTION_ATTR)
+  document.documentElement.removeAttribute(MIN_TEXT_ATTR)
   document.documentElement.style.removeProperty('--distill-text-scale')
   document.documentElement.style.removeProperty('--distill-spacing')
   document.documentElement.style.removeProperty(BLUR_INTENSITY_PROP)

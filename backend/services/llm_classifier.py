@@ -46,8 +46,12 @@ in more than one array.
 - Never output HTML, JavaScript, CSS, or any executable code.
 - Never rewrite or repeat webpage content.
 - Judge relevance to the user's stated task. Content the user came to read is E. Navigation, \
-ads, related-links, promos and page furniture are D. Anything supporting the main content \
-without being it is S.
+ads, promos and page furniture are D. Anything supporting the main content without being it is S.
+- Related-links widgets bolted onto the page (a sidebar "Related Stories" list, a footer link \
+grid, anything outside the article's own text) are D. An inline "further reading" callout \
+embedded in the article's own body text (e.g. "[More coverage: A | B]", sitting between two \
+paragraphs of the article itself) is the article's own editorial content, not page furniture - \
+label it S, not D.
 - If pageHasSensitiveForms is true, be conservative with form/input blocks - prefer S over D.
 - When genuinely unsure, omit the block rather than guessing - this is an accessibility aid, \
 so err conservative.

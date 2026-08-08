@@ -13,18 +13,17 @@ import {
   enableProgressiveReveal,
   getBlurIntensity,
   hiddenAdCount,
-  INCREASED_SPACING_MULTIPLIER,
   isColorVariationReduced,
+  isLargerTextOn,
   isProgressiveRevealOn,
   isReduceMotionOn,
   isSimplificationActive,
-  isSpacingIncreased,
   prefilterPage,
   restoreOriginalPage,
   restoreOriginalPageAnimated,
   revealSimplification,
   setBlurIntensity,
-  setIncreaseSpacing,
+  setLargerText,
   setReduceColorVariation,
   setReduceMotion,
   type SimplifyResult,
@@ -37,7 +36,8 @@ export interface SimplifySettings {
   // 0..1 — the sidepanel's Intensity slider (1-100%) divided by 100.
   simplificationStrength: number
   reduceMotion: boolean
-  increaseSpacing: boolean
+  largerText: boolean
+  reduceColorVariation: boolean
 }
 
 // Used when the sidepanel sends no settings (older panel build, or a simplify
@@ -45,20 +45,22 @@ export interface SimplifySettings {
 const FALLBACK_SETTINGS: SimplifySettings = {
   simplificationStrength: DEFAULT_PROFILE.simplificationStrength,
   reduceMotion: DEFAULT_PROFILE.reduceMotion,
-  increaseSpacing: DEFAULT_PROFILE.spacingMultiplier > 1,
+  largerText: false,
+  reduceColorVariation: false,
 }
 
 // Calibration result (if any) is the base; the sidepanel's live Simplification
-// Controls always win over it for these three fields, same as they already
-// win over DEFAULT_PROFILE — an explicit toggle is stronger intent than a
-// one-time calibration result.
+// Controls always win over it for these fields, same as they already win over
+// DEFAULT_PROFILE — an explicit toggle is stronger intent than a one-time
+// calibration result. spacingMultiplier is deliberately left to the base profile:
+// larger text (settings.largerText, applied separately via setLargerText()) is
+// its own independent axis now, not a stand-in for paragraph/list spacing.
 async function profileFor(settings: SimplifySettings): Promise<VisualProfile> {
   const base = (await loadCalibratedProfile()) ?? DEFAULT_PROFILE
   return {
     ...base,
     simplificationStrength: settings.simplificationStrength,
     reduceMotion: settings.reduceMotion,
-    spacingMultiplier: settings.increaseSpacing ? INCREASED_SPACING_MULTIPLIER : 1,
   }
 }
 
@@ -183,8 +185,9 @@ async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResul
   // heuristic runs, which sets no layout variables of its own.
   applyLayoutPreferences({
     reduceMotion: settings.reduceMotion,
-    increaseSpacing: settings.increaseSpacing,
+    largerText: settings.largerText,
   })
+  setReduceColorVariation(settings.reduceColorVariation)
   // Same Intensity value the backend used for classification also drives how
   // strongly blurred deemphasized (not collapsed) content looks.
   setBlurIntensity(settings.simplificationStrength)
@@ -261,9 +264,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ applied, intensity: getBlurIntensity() })
       return true
     }
-    case 'DISTILL_SET_SPACING': {
-      const applied = setIncreaseSpacing(!!message.enabled)
-      sendResponse({ applied, active: isSpacingIncreased() })
+    case 'DISTILL_SET_LARGER_TEXT': {
+      const applied = setLargerText(!!message.enabled)
+      sendResponse({ applied, active: isLargerTextOn() })
       return true
     }
     case 'DISTILL_SET_PROGRESSIVE_REVEAL': {
@@ -285,7 +288,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         progressiveRevealAvailable: canUseProgressiveReveal(),
         progressiveRevealActive: isProgressiveRevealOn(),
         reduceMotionActive: isReduceMotionOn(),
-        spacingIncreased: isSpacingIncreased(),
+        largerTextActive: isLargerTextOn(),
         blurIntensity: getBlurIntensity(),
       })
       return true
