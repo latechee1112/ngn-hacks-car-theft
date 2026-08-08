@@ -10,6 +10,7 @@ import {
   canUseProgressiveReveal,
   disableProgressiveReveal,
   enableProgressiveReveal,
+  getBlurIntensity,
   hiddenAdCount,
   INCREASED_SPACING_MULTIPLIER,
   isColorVariationReduced,
@@ -158,6 +159,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ applied, active: isReduceMotionOn() })
       return true
     }
+    case 'DISTILL_SET_BLUR': {
+      // Pure CSS variable — no re-analysis, so a slider drag repaints the page
+      // live. applied:false only means nothing is simplified yet; the panel keeps
+      // the value and it ships with the next DISTILL_SIMPLIFY.
+      const applied = setBlurIntensity(Number(message.intensity))
+      sendResponse({ applied, intensity: getBlurIntensity() })
+      return true
+    }
     case 'DISTILL_SET_SPACING': {
       const applied = setIncreaseSpacing(!!message.enabled)
       sendResponse({ applied, active: isSpacingIncreased() })
@@ -183,6 +192,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         progressiveRevealActive: isProgressiveRevealOn(),
         reduceMotionActive: isReduceMotionOn(),
         spacingIncreased: isSpacingIncreased(),
+        blurIntensity: getBlurIntensity(),
       })
       return true
     default:

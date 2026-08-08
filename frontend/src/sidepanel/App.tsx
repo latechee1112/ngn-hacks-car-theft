@@ -81,9 +81,6 @@ function App() {
   // Guards the persist effect below: without it the first render would write
   // the defaults over whatever was stored before load() resolves.
   const [settingsLoaded, setSettingsLoaded] = useState(false)
-  // Intensity feeds the backend's classification, so it can only take effect on
-  // the next run. Tracking what was actually sent lets us say so honestly.
-  const [appliedIntensity, setAppliedIntensity] = useState<number | null>(null)
 
   async function refreshStatus() {
     try {
@@ -98,6 +95,7 @@ function App() {
         reduceMotionActive: boolean
         spacingIncreased: boolean
         adsHidden: number
+        blurIntensity: number
       }
       setSimplified(response.simplified)
       setAdsHidden(response.adsHidden ?? 0)
@@ -111,6 +109,11 @@ function App() {
       if (response.simplified) {
         setReduceMotion(response.reduceMotionActive)
         setIncreaseSpacing(response.spacingIncreased)
+        // The live page is the source of truth for blur while it is simplified,
+        // so reopening the panel shows the blur actually on screen.
+        if (Number.isFinite(response.blurIntensity)) {
+          setIntensity(Math.round(response.blurIntensity * 100))
+        }
       }
     } catch {
       setSimplified(false)
@@ -164,7 +167,6 @@ function App() {
       setAdsHidden(response.adsHidden ?? 0)
       setColorReductionAvailable(response.primaryFound)
       setProgressiveRevealAvailable(response.primaryFound)
-      setAppliedIntensity(intensity)
     } catch (err) {
       setError(`Couldn't simplify this page: ${String(err)}`)
     } finally {
@@ -186,7 +188,6 @@ function App() {
       setColorReductionActive(false)
       setProgressiveRevealAvailable(false)
       setProgressiveRevealActive(false)
-      setAppliedIntensity(null)
       setAdsHidden(0)
     } catch (err) {
       setError(`Couldn't restore this page: ${String(err)}`)
@@ -262,6 +263,22 @@ function App() {
   function toggleIncreaseSpacing(enabled: boolean) {
     setIncreaseSpacing(enabled)
     pushLayoutPreference('DISTILL_SET_SPACING', enabled)
+  }
+
+  // Blur is a CSS variable on the page, so a drag repaints immediately — no
+  // re-analysis, nothing to wait for. Fired on every change event; each message
+  // is a single custom-property write, which is cheap enough to keep up with
+  // the slider.
+  async function changeBlurIntensity(next: number) {
+    setIntensity(next)
+    try {
+      const tabId = await getActiveTabId()
+      if (!tabId) return
+      await chrome.tabs.sendMessage(tabId, { type: 'DISTILL_SET_BLUR', intensity: next / 100 })
+    } catch {
+      // No content script on this tab. The value is still stored and still
+      // applies the next time a page is simplified.
+    }
   }
 
   async function toggleColorReduction(enabled: boolean) {
@@ -381,27 +398,21 @@ function App() {
           <div className="overflow-hidden rounded-md border border-outline bg-surface">
             <div className="border-b border-outline p-4">
               <div className="mb-3 flex items-center justify-between">
-                <label htmlFor="distill-intensity" className="text-body font-medium text-on-surface">
-                  Intensity
+                <label htmlFor="distill-blur-intensity" className="text-body font-medium text-on-surface">
+                  Blur intensity
                 </label>
                 <span className="text-meta tabular-nums text-on-surface-variant">{intensity}%</span>
               </div>
+              {/* Applies live on drag — it drives a CSS variable on the page, so
+                  there is nothing to re-run and nothing to warn about. */}
               <input
-                id="distill-intensity"
+                id="distill-blur-intensity"
                 type="range"
                 min={1}
                 max={100}
                 value={intensity}
-                onChange={(e) => setIntensity(Number(e.target.value))}
+                onChange={(e) => changeBlurIntensity(Number(e.target.value))}
               />
-              {/* Intensity is an input to the backend's classification, not a
-                  CSS switch — it cannot retroactively change an analysis that
-                  already ran, so say so rather than looking broken. */}
-              {simplified && appliedIntensity !== null && appliedIntensity !== intensity && (
-                <p className="mt-3 text-meta text-on-surface-variant">
-                  Applies on next simplify (currently {appliedIntensity}%).
-                </p>
-              )}
             </div>
 
             <div className="flex flex-col">
