@@ -71,17 +71,14 @@ def needs_llm_review(block: PageBlock) -> bool:
         That is a guess about page furniture, and it is wrong exactly when a
         site puts real content in an <aside> - the case where a model's reading
         of the text earns its keep.
-      - DISTRACTING inferred purely from is_repeated_link when the block sits
-        inside the main/article landmark. A dense link cluster is unambiguous
-        page furniture in a nav/aside/footer, but the same link-density signal
-        also fires on an inline "further reading" callout an article embeds in
-        its own body text (e.g. "[More coverage: A | B]") - real editorial
-        content, not a bolted-on related-links widget. That is exactly the
-        case worth a model's read of the surrounding text.
 
-    Everything else is skipped: safety-critical and ad/promo/autoplay are hard
-    signals, main/article is the safe direction, and a Supporting block is
-    kept either way so the label cannot change the outcome.
+    Everything else is skipped: safety-critical and ad/promo/autoplay/repeated-link
+    are hard signals, main/article is the safe direction, and a Supporting block
+    is kept either way so the label cannot change the outcome. is_repeated_link in
+    particular stays a hard signal for latency (see llm_classifier.py's decode-cost
+    note) - false positives on inline "further reading" callouts (e.g. AccuWeather's
+    "[More coverage: A | B]") are handled per-site in the frontend's siteRules.ts
+    instead of paying an LLM round-trip on every page with a dense link cluster.
     """
     if block.is_safety_critical():
         return False
@@ -90,9 +87,6 @@ def needs_llm_review(block: PageBlock) -> bool:
     if category == ClassificationLabel.UNCERTAIN:
         return True
     if category == ClassificationLabel.DISTRACTING:
-        landmark = (block.landmark or "").lower()
-        if block.is_repeated_link and landmark in _MAIN_LANDMARKS:
-            return True
         return not (
             block.is_ad
             or block.is_sticky_promo

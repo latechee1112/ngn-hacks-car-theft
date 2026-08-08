@@ -47,6 +47,10 @@ export interface SiteRule {
   // the column squeezes the whole page into a strip and wraps the rail one word per
   // line. On a hand-tuned page the blur is the whole intended change.
   disableReadingColumn?: boolean
+  // Same job as keepSharpSelectors, for a target no static CSS selector can name —
+  // e.g. AccuWeather's inline "further reading" callouts, which carry no distinguishing
+  // class and are only recognizable by their own bracket-wrapped text convention.
+  keepSharpMatcher?: () => Element[]
 }
 
 // --- Devpost project pages -------------------------------------------------
@@ -93,7 +97,36 @@ const DEVPOST_PROJECT: SiteRule = {
   disableReadingColumn: true,
 }
 
-const SITE_RULES: SiteRule[] = [DEVPOST_PROJECT]
+// --- AccuWeather articles ---------------------------------------------------
+// https://www.accuweather.com/en/<section>/<slug>/<id>. AccuWeather writes its own
+// "further reading" citations inline in the article body as a bracket-wrapped
+// sentence — e.g. "[More wildfire coverage: <a>Before-and-after images...</a> |
+// <a>Check your local air quality</a>]" — with no distinguishing class name, just a
+// <p class="paragraph-block"> whose text starts with "[" and ends with "]". The
+// backend's link-density heuristic reads that the same as a bolted-on sidebar
+// "Related Stories" widget and deemphasizes it, blurring real editorial content.
+// There is no reliable CSS selector for "starts with [", so this is matched by
+// text rather than by keepSharpSelectors.
+const ACCUWEATHER_INLINE_CALLOUT_PATTERN = /^\[[\s\S]*\]$/
+
+function findAccuWeatherInlineCallouts(): Element[] {
+  return Array.from(document.querySelectorAll('p.paragraph-block')).filter((el) =>
+    ACCUWEATHER_INLINE_CALLOUT_PATTERN.test((el.textContent || '').trim()),
+  )
+}
+
+const ACCUWEATHER_ARTICLE: SiteRule = {
+  name: 'accuweather-article',
+  hostPattern: /(^|\.)accuweather\.com$/i,
+  // /en/us/<city>/<zip>/weather-forecast/<id> (a forecast page, not an article) has
+  // six path segments and never matches this four-segment shape.
+  pathPattern: /^\/en\/[^/]+\/[^/]+\/\d+\/?$/i,
+  confirm: () => !!document.querySelector('.news-article'),
+  blurSelectors: [],
+  keepSharpMatcher: findAccuWeatherInlineCallouts,
+}
+
+const SITE_RULES: SiteRule[] = [DEVPOST_PROJECT, ACCUWEATHER_ARTICLE]
 
 export function findSiteRule(loc: Location = window.location): SiteRule | null {
   return (
@@ -166,5 +199,10 @@ function keepSharp(rule: SiteRule): void {
         node.classList.remove(...SUPPRESSION_CLASSES)
       }
     })
+  })
+  rule.keepSharpMatcher?.().forEach((el) => {
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      node.classList.remove(...SUPPRESSION_CLASSES)
+    }
   })
 }
