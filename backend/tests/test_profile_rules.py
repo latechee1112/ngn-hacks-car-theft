@@ -17,7 +17,7 @@ def test_high_clutter_reduces_max_visible_blocks():
     result = generate_profile(CalibrationRequest(trials=trials))
     assert result.profile.max_visible_blocks == 6
     assert any("more than 6 objects" in e for e in result.explanation)
-
+#
 
 def test_low_clutter_keeps_default_max_visible_blocks():
     trials = [
