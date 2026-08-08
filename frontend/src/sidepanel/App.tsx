@@ -62,6 +62,9 @@ function App() {
   const [progressiveRevealActive, setProgressiveRevealActive] = useState(false)
   const [error, setError] = useState<string>('')
   const [analyzing, setAnalyzing] = useState(false)
+  // Ads/sponsored units the local pre-filter removed on this page. 0 is a real
+  // answer ("clean page"), so this only renders once something is simplified.
+  const [adsHidden, setAdsHidden] = useState(0)
 
   // Debug-only: the last raw extraction, pretty-printed. null means "never
   // dumped in this panel session" — the output panel stays hidden until then.
@@ -92,8 +95,10 @@ function App() {
         progressiveRevealActive: boolean
         reduceMotionActive: boolean
         spacingIncreased: boolean
+        adsHidden: number
       }
       setSimplified(response.simplified)
+      setAdsHidden(response.adsHidden ?? 0)
       setColorReductionAvailable(response.colorReductionAvailable)
       setColorReductionActive(response.colorReductionActive)
       setProgressiveRevealAvailable(response.progressiveRevealAvailable)
@@ -152,8 +157,9 @@ function App() {
           reduceMotion,
           increaseSpacing,
         },
-      })) as { primaryFound: boolean; deemphasizedCount: number }
+      })) as { primaryFound: boolean; deemphasizedCount: number; adsHidden: number }
       setSimplified(true)
+      setAdsHidden(response.adsHidden ?? 0)
       setColorReductionAvailable(response.primaryFound)
       setProgressiveRevealAvailable(response.primaryFound)
       setAppliedIntensity(intensity)
@@ -179,6 +185,7 @@ function App() {
       setProgressiveRevealAvailable(false)
       setProgressiveRevealActive(false)
       setAppliedIntensity(null)
+      setAdsHidden(0)
     } catch (err) {
       setError(`Couldn't restore this page: ${String(err)}`)
     }
@@ -348,6 +355,14 @@ function App() {
         </div>
 
         {error && <p className="text-meta text-danger-text">{error}</p>}
+
+        {simplified && (
+          <p className="text-meta text-on-surface-variant">
+            {adsHidden > 0
+              ? `Filtered ${adsHidden} ad${adsHidden === 1 ? '' : 's'} / sponsored block${adsHidden === 1 ? '' : 's'} locally.`
+              : 'No obvious ads or sponsored blocks found on this page.'}
+          </p>
+        )}
 
         <div className="rounded-md border border-outline bg-surface p-4">
           <div className="mb-2 flex items-center gap-2">

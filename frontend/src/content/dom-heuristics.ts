@@ -1,4 +1,28 @@
-export const AD_PATTERN = /(^|[-_ ])ad([-_ ]|$)|advert|sponsor|adsbygoogle/i
+// Marks a block the local pre-filter already resolved as an ad. Lives here rather than
+// in simplify.ts so extract.ts can skip these without importing simplify (which imports
+// extract) — and so the "is this filtered?" check is one shared definition.
+export const AD_HIDDEN_CLASS = 'distill-ad-hidden'
+
+export function isPrefilteredAd(el: Element): boolean {
+  return !!el.closest(`.${AD_HIDDEN_CLASS}`)
+}
+
+export const AD_PATTERN = /(^|[-_ ])ad([-_ ]|$)|advert|sponsor|promoted|adsbygoogle/i
+// Third-party ad/tracking hosts, matched against iframe/ins src attributes.
+export const AD_NETWORK_PATTERN =
+  /doubleclick|googlesyndication|googleadservices|googletagservices|adservice|adnxs|amazon-adsystem|taboola|outbrain|criteo|pubmatic|rubiconproject|moatads|zedo|adroll|media\.net/i
+// The visible label a feed puts on a paid unit. Matched against an element's
+// *entire* trimmed text, so it only ever fires on the small badge itself
+// ("Promoted", "Sponsored · claude.com") and never on an article that merely
+// mentions the word somewhere in its body.
+// Anchored at the start, with an optional short tail for the forms that name the
+// advertiser: "Promoted by Acme", "Sponsored · claude.com", "Ads by Google".
+export const SPONSORED_LABEL_PATTERN =
+  /^(?:promoted|sponsored|advertisement|paid (?:partnership|post|content)|ads? by\b)(?:[\s·•|:\-–—]+.{0,40})?$/i
+// One separator-delimited segment that is nothing but the badge word.
+export const SPONSORED_SEGMENT_PATTERN = /^(?:promoted|sponsored|advertisement|ad)$/i
+// Long enough for "Sponsored · Some Brand Name", short enough that no real post body fits.
+const SPONSORED_LABEL_MAX_LEN = 60
 export const POPUP_PATTERN = /modal|popup|overlay|lightbox/i
 export const SIDEBAR_PATTERN = /sidebar/i
 export const CONSENT_CLASS_PATTERN = /cookie|consent|gdpr/i
@@ -22,9 +46,39 @@ export function isVisible(el: Element): boolean {
   return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0'
 }
 
+// Class/id naming is the main signal, but feed apps (Reddit, X, LinkedIn) name their
+// nodes by test id or label them for screen readers instead, so those count too.
 export function isAdLike(el: Element): boolean {
-  const cls = classNameString(el)
-  return AD_PATTERN.test(cls) || (el.tagName.toLowerCase() === 'ins' && cls.includes('adsbygoogle'))
+  const hay = [
+    classNameString(el),
+    el.getAttribute('data-testid') || '',
+    el.getAttribute('data-test-id') || '',
+    el.getAttribute('aria-label') || '',
+  ].join(' ')
+  if (AD_PATTERN.test(hay)) return true
+  if (el.hasAttribute('data-ad-client') || el.hasAttribute('data-ad-slot') || el.hasAttribute('data-ad-unit')) return true
+  return el.tagName.toLowerCase() === 'ins' && classNameString(el).includes('adsbygoogle')
+}
+
+// An iframe/script served by a known ad network — the actual creative, whatever the
+// surrounding markup happens to be named.
+export function isAdNetworkFrame(el: Element): boolean {
+  const tag = el.tagName.toLowerCase()
+  if (tag !== 'iframe' && tag !== 'ins' && tag !== 'embed') return false
+  const src = el.getAttribute('src') || el.getAttribute('data-src') || ''
+  return AD_NETWORK_PATTERN.test(src) || /^google_ads/i.test(el.id || '')
+}
+
+// True when this element IS the little "Promoted"/"Sponsored" badge — not when it
+// merely contains one. Callers walk up from here to find the post it belongs to.
+export function isSponsoredLabel(el: Element): boolean {
+  const text = (el.textContent || '').replace(/\s+/g, ' ').trim()
+  if (!text || text.length > SPONSORED_LABEL_MAX_LEN) return false
+  if (SPONSORED_LABEL_PATTERN.test(text)) return true
+  // Feeds often fuse the badge into the byline row — "anthropic-ai · Promoted",
+  // "Some Brand • Sponsored". Checking each separator-delimited segment catches those
+  // without matching prose, since a whole segment has to be exactly the badge word.
+  return text.split(/[·•|]|\s[–—-]\s/).some((segment) => SPONSORED_SEGMENT_PATTERN.test(segment.trim()))
 }
 
 export function isPopupLike(el: Element): boolean {
