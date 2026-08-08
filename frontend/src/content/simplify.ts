@@ -18,7 +18,8 @@ const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
 const DEEMPHASIZE_CLASS = 'distill-deemphasize'
-const UNSTICK_CLASS = 'distill-unstick'
+const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
+const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
 const NEUTRAL_COLOR = '#1a1a1a'
 const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
@@ -207,6 +208,15 @@ function stopAdObserver(): void {
   adObserver = null
 }
 
+// Sticky and fixed need different replacements to stay layout-neutral, and only the
+// computed style knows which one this is — so the choice is made here, in JS, rather
+// than by one blanket CSS rule.
+function unstick(el: Element): void {
+  const position = getComputedStyle(el).position
+  if (position === 'fixed') el.classList.add(UNSTICK_FIXED_CLASS)
+  else if (position === 'sticky') el.classList.add(UNSTICK_STICKY_CLASS)
+}
+
 function pauseAutoplayMedia(): void {
   document.querySelectorAll<HTMLMediaElement>('video[autoplay], audio[autoplay]').forEach((media) => {
     saveOriginal(media)
@@ -261,8 +271,20 @@ html[${SIMPLIFIED_ATTR}] .${DEEMPHASIZE_CLASS} a[href] {
   opacity: 1 !important;
   filter: none !important;
 }
-html[${SIMPLIFIED_ATTR}] .${UNSTICK_CLASS} {
-  position: static !important;
+/* Un-sticking must not change layout. position:static would drop a fixed header into
+   normal flow, pushing everything below it down — on a site whose hero sizes itself
+   against that header, the hero visibly grows by exactly the header's height.
+   absolute/relative stop the element from following the scroll while it keeps the
+   exact box it already had: fixed elements stay out of flow, sticky ones keep the
+   space flow already reserved for them. */
+html[${SIMPLIFIED_ATTR}] .${UNSTICK_FIXED_CLASS} {
+  position: absolute !important;
+  max-width: 100% !important;
+}
+html[${SIMPLIFIED_ATTR}] .${UNSTICK_STICKY_CLASS} {
+  position: relative !important;
+  top: auto !important;
+  bottom: auto !important;
 }
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS},
 html[${SIMPLIFIED_ATTR}] .${PRIMARY_CLASS}.${NEUTRAL_COLOR_CLASS} :not(form):not(form *):not(button):not(button *) {
@@ -394,7 +416,7 @@ export function applySimplification(): SimplifyResult {
   targets.forEach((el) => {
     saveOriginal(el)
     el.classList.add(DEEMPHASIZE_CLASS)
-    if (isStickyOrFixed(el)) el.classList.add(UNSTICK_CLASS)
+    unstick(el)
   })
 
   const adsHidden = hideAds(primary)
@@ -441,7 +463,7 @@ export function applyBackendActions(actions: BlockAction[], layout: LayoutSettin
         break
       case 'deemphasize':
         el.classList.add(DEEMPHASIZE_CLASS)
-        if (isStickyOrFixed(el)) el.classList.add(UNSTICK_CLASS)
+        unstick(el)
         deemphasizedCount++
         break
       case 'collapse':
