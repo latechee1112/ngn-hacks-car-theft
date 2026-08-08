@@ -601,20 +601,20 @@ function App() {
             </details>
           )}
         </div>
-      </main>
 
-      <footer className="flex w-full shrink-0 flex-col items-center gap-2 border-t border-outline bg-background px-4 py-4 text-meta text-on-surface-variant">
-        <div className="flex items-center gap-3">
-          <a className={`rounded-sm transition-colors hover:text-on-background ${FOCUS_RING}`} href="#">
-            Privacy
-          </a>
-          <span className="text-on-surface-muted">·</span>
-          <a className={`rounded-sm transition-colors hover:text-on-background ${FOCUS_RING}`} href="#">
-            Feedback
-          </a>
-        </div>
-        <p className="text-on-surface-muted">Distill v{EXTENSION_VERSION}</p>
-      </footer>
+        <footer className="mt-2 flex w-full flex-col items-center gap-2 border-t border-outline pt-4 text-meta text-on-surface-variant">
+          <div className="flex items-center gap-3">
+            <a className={`rounded-sm transition-colors hover:text-on-background ${FOCUS_RING}`} href="#">
+              Privacy
+            </a>
+            <span className="text-on-surface-muted">·</span>
+            <a className={`rounded-sm transition-colors hover:text-on-background ${FOCUS_RING}`} href="#">
+              Feedback
+            </a>
+          </div>
+          <p className="text-on-surface-muted">Distill v{EXTENSION_VERSION}</p>
+        </footer>
+      </main>
     </div>
   )
 }
