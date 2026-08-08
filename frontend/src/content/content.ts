@@ -59,9 +59,36 @@ async function profileFor(settings: SimplifySettings): Promise<VisualProfile> {
   }
 }
 
+// The scan sweep plays until handleSimplify() settles, so nothing in that pipeline may
+// hang forever. sendMessage's callback is the one link that can silently never fire:
+// if the service worker is torn down mid-request — which is what closing the side panel
+// can trigger — no reply and no lastError ever arrive, the promise below stays pending,
+// and the user is left watching a sweep loop over a page nothing is analyzing.
+//
+// The ceiling sits above the background's own 60s analyze timeout plus network slack, so
+// a legitimately slow analysis still wins the race and only a truly dead request trips
+// it. Timing out is not a failure state: it resolves like any other unreachable-backend
+// result, so the local heuristic runs and the page still gets simplified.
+const ANALYSIS_HARD_TIMEOUT_MS = 70000
+
 function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendResult> {
   const extraction = extractPage()
   return new Promise((resolve) => {
+    // Whichever settles first wins; the loser's resolve() is a no-op.
+    const timer = window.setTimeout(
+      () =>
+        resolve({
+          ok: false,
+          error: `No response from background service worker after ${ANALYSIS_HARD_TIMEOUT_MS}ms`,
+        }),
+      ANALYSIS_HARD_TIMEOUT_MS,
+    )
+
+    const settle = (result: AnalyzeBackendResult) => {
+      window.clearTimeout(timer)
+      resolve(result)
+    }
+
     chrome.runtime.sendMessage(
       {
         type: 'DISTILL_ANALYZE_PAGE',
@@ -69,13 +96,13 @@ function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendR
       },
       (response: AnalyzeBackendResult | undefined) => {
         if (chrome.runtime.lastError || !response) {
-          resolve({
+          settle({
             ok: false,
             error: chrome.runtime.lastError?.message || 'No response from background service worker',
           })
           return
         }
-        resolve(response)
+        settle(response)
       },
     )
   })
@@ -96,8 +123,7 @@ function requestBackendAnalysis(profile: VisualProfile): Promise<AnalyzeBackendR
 async function handleSimplify(settings: SimplifySettings): Promise<SimplifyResult> {
   const prefiltered = prefilterPage()
   console.log(
-    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s), blurred ${prefiltered.deemphasized} secondary region(s) ` +
-      `and ${prefiltered.siteRuleBlurred} site-rule region(s) before analysis`,
+    `[Distill] pre-filter hid ${prefiltered.adsHidden} ad/sponsored block(s) and blurred ${prefiltered.deemphasized} secondary region(s) before analysis`,
   )
 
   const result = await requestBackendAnalysis(await profileFor(settings))
@@ -143,8 +169,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // Activate only — restoring the page does not replay it.
       const settings: SimplifySettings = { ...FALLBACK_SETTINGS, ...(message.settings ?? {}) }
       const stopScan = startScanAnimation()
+      // Closing the side panel while the scan runs closes the channel this reply goes
+      // down, and sendResponse then throws. That must not be mistaken for the analysis
+      // failing: unguarded, the throw lands in the .catch below, which rolls the whole
+      // page back — so closing the panel would silently undo the simplification the
+      // user asked for. Nobody is listening either way, so the failure is ignorable.
+      const respond = (payload: SimplifyResponse) => {
+        try {
+          sendResponse(payload)
+        } catch {
+          // Panel already gone.
+        }
+      }
       handleSimplify(settings)
-        .then((result) => sendResponse({ ok: true, ...result } satisfies SimplifyResponse))
+        .then((result) => respond({ ok: true, ...result } satisfies SimplifyResponse))
         .catch((err) => {
           console.error('[Distill] simplify failed:', err)
           // prefilterPage() has already hidden ads and blurred secondary content by
@@ -152,7 +190,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           // added on the success paths. Rolling back is the one state we can still
           // guarantee is coherent, and it's the state the panel will show.
           restoreOriginalPage()
-          sendResponse({
+          respond({
             ok: false,
             error: err instanceof Error ? err.message : String(err),
           } satisfies SimplifyResponse)

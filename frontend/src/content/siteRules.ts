@@ -9,7 +9,14 @@
 // Same machinery as everything else: snapshot with saveOriginal(), toggle a class,
 // so restoreOriginalPage() undoes these with no special case.
 
-import { DEEMPHASIZE_CLASS, isVisible } from './dom-heuristics'
+import {
+  AD_HIDDEN_CLASS,
+  DEEMPHASIZE_CLASS,
+  isVisible,
+  SECTION_HIDDEN_CLASS,
+  UNSTICK_FIXED_CLASS,
+  UNSTICK_STICKY_CLASS,
+} from './dom-heuristics'
 import { saveOriginal } from './originalState'
 
 // Deliberately NOT the generic DEEMPHASIZE_CLASS: that rule un-blurs nested links and
@@ -29,6 +36,12 @@ export interface SiteRule {
   // Everything matching these is blurred. Missing selectors are simply skipped, so
   // a Devpost markup change degrades to "blurs less", never to a broken page.
   blurSelectors: string[]
+  // Elements that must stay sharp and clickable. A CSS filter on an ancestor blurs
+  // its whole subtree and a child cannot opt out, so this can't be a style rule — it
+  // clears the blur classes off each match's ancestor chain instead. blurSelectors
+  // therefore has to name the *siblings* to blur, not a container; these are the
+  // backstop against a container getting blurred by one of the generic passes.
+  keepSharpSelectors?: string[]
   // Suppresses the 760px reading column and the text upscale. Set it for any page
   // whose main region is a real multi-column layout rather than an article: forcing
   // the column squeezes the whole page into a strip and wraps the rail one word per
@@ -49,8 +62,10 @@ const DEVPOST_PROJECT: SiteRule = {
   // A real project page is the only one with the project header on it.
   confirm: () => !!document.getElementById('software-header'),
   blurSelectors: [
-    // Site chrome across the top.
-    '#global-nav',
+    // Site chrome across the top — the menus, search and account controls, but not
+    // the title area holding the Devpost logo. :not(.title-area) is for the mobile
+    // bar, whose logo <ul> carries both classes.
+    '#global-nav .top-bar-section:not(.title-area)',
     // Like / Comment buttons under the title (the title itself stays sharp).
     '#software-header .software-likes',
     '#software-comment-button',
@@ -71,6 +86,8 @@ const DEVPOST_PROJECT: SiteRule = {
     '.software-update-comments form',
     '.join-the-conversation',
   ],
+  // The Devpost logo stays sharp and clickable, so the top bar is still a way home.
+  keepSharpSelectors: ['#logo'],
   // The story and the "Submitted to"/"Created by" rail are siblings inside one grid;
   // isProseLike() sees enough prose to claim the whole thing and narrows it.
   disableReadingColumn: true,
@@ -118,5 +135,36 @@ export function applySiteRules(): number {
     el.classList.add(HARD_BLUR_CLASS)
   })
 
+  keepSharp(rule)
+
   return targets.length
+}
+
+// Every class that can make an ancestor take its subtree down with it: the two blurs,
+// display:none from a backend 'collapse', display:none from the ad pass, and the
+// unstick rules that reposition a bar out from under the content. Blur was not enough
+// on its own — the top bar kept disappearing outright because the backend collapses
+// site navigation at a high intensity, and clearing only the blur left it hidden.
+const SUPPRESSION_CLASSES = [
+  HARD_BLUR_CLASS,
+  DEEMPHASIZE_CLASS,
+  SECTION_HIDDEN_CLASS,
+  AD_HIDDEN_CLASS,
+  UNSTICK_FIXED_CLASS,
+  UNSTICK_STICKY_CLASS,
+]
+
+// Walks up from each keep-sharp element clearing those classes off the whole ancestor
+// chain, so nothing above it can blur or hide it by inheritance — whether that came
+// from our own selectors, the generic secondary pass (which sees #global-nav as a nav),
+// or a backend deemphasize/collapse. Runs after the blur pass, and applySiteRules()
+// itself runs last in both simplify paths, so this is the final word.
+function keepSharp(rule: SiteRule): void {
+  rule.keepSharpSelectors?.forEach((selector) => {
+    document.querySelectorAll(selector).forEach((el) => {
+      for (let node: Element | null = el; node; node = node.parentElement) {
+        node.classList.remove(...SUPPRESSION_CLASSES)
+      }
+    })
+  })
 }

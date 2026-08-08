@@ -9,6 +9,9 @@ import {
   isSponsoredLabel,
   isStickyOrFixed,
   isVisible,
+  SECTION_HIDDEN_CLASS,
+  UNSTICK_FIXED_CLASS,
+  UNSTICK_STICKY_CLASS,
 } from './dom-heuristics'
 import { FF_ID_ATTR } from './extract'
 import { pruneDetachedOriginals, restoreAllOriginal, saveOriginal } from './originalState'
@@ -20,11 +23,8 @@ const STYLE_TAG_ID = 'distill-global-style'
 const RESTORE_BTN_ID = 'distill-restore-button'
 const PRIMARY_CLASS = 'distill-primary-content'
 const READING_COLUMN_CLASS = 'distill-reading-column'
-const UNSTICK_FIXED_CLASS = 'distill-unstick-fixed'
-const UNSTICK_STICKY_CLASS = 'distill-unstick-sticky'
 const NEUTRAL_COLOR_CLASS = 'distill-neutral-color'
 const NEUTRAL_COLOR = '#1a1a1a'
-const SECTION_HIDDEN_CLASS = 'distill-section-hidden'
 const PROGRESSIVE_CONTROLS_ID = 'distill-progressive-controls'
 const SECTION_HEADING_SELECTOR = /^h[23]$/i
 const BLUR_INTENSITY_PROP = '--distill-blur-intensity'
