@@ -41,12 +41,24 @@ const REDUCED_LOOP_MS = 1100
 const REDUCED_OUTRO_MS = 220
 const REDUCED_MIN_VISIBLE_MS = REDUCED_INTRO_MS + 40
 
-// Safety net, not the normal path: if stop() is somehow never called (e.g.
-// the tab navigates away mid-request in a way that drops the response), this
-// force-removes the layer well after the backend's own LLM_TIMEOUT_SECONDS
-// (8s) would have given up, so it never fires for a genuinely slow-but-alive
-// call.
-const SAFETY_MAX_MS = 20000
+// Safety net, not the normal path: if stop() can never be called, the layer has
+// to come down on its own. This is deliberately NOT a time limit — analysis has
+// no fixed upper bound (a 100+ block page against a slow LLM legitimately runs
+// for a minute), and a sweep that quits while work is still in flight tells the
+// user the wrong thing. So the net checks *liveness* instead: the only way the
+// caller can lose its ability to call stop() is the extension context going away
+// (reload/update/uninstall), which invalidates chrome.runtime. While the context
+// is alive, the sweep keeps looping for as long as the work takes.
+const LIVENESS_POLL_MS = 5000
+
+function isExtensionContextAlive(): boolean {
+  try {
+    return !!chrome.runtime?.id
+  } catch {
+    // Accessing chrome.runtime after invalidation throws rather than returning undefined.
+    return false
+  }
+}
 
 // Two-tier mesh: fine cells inside heavier major cells. Reads as a denser,
 // more deliberate scan than a single grid at the same line weight would.
@@ -188,6 +200,11 @@ function removeScanLayer(): void {
  * removing itself. Safe to call repeatedly; an in-flight sweep is torn down
  * and restarted so one Activate press yields exactly one animation.
  *
+ * "Indefinitely" is literal: the loop has no time limit and never stops itself
+ * because the work is slow. It ends when the caller says the work is done, or —
+ * only if the extension context dies and no caller is left to say so — when the
+ * liveness check notices.
+ *
  * Both starting and stopping return immediately. Callers must not await
  * `startScanAnimation()` or let it sequence work — it is decoration running
  * alongside the real analysis call, never in front of it.
@@ -235,7 +252,7 @@ export function startScanAnimation(): () => void {
     if (removed) return
     removed = true
     window.clearTimeout(introTimer)
-    window.clearTimeout(safetyTimer)
+    window.clearInterval(livenessTimer)
     root.classList.remove('looping')
     root.classList.add('outro')
     window.setTimeout(removeScanLayer, outroMs + 100)
@@ -248,7 +265,11 @@ export function startScanAnimation(): () => void {
     if (!removed) root.classList.add('looping')
   }, introMs)
 
-  const safetyTimer = window.setTimeout(finish, SAFETY_MAX_MS)
+  // No elapsed-time component: this tears the layer down only once nobody is left
+  // who could call stop(), never because the analysis is "taking too long".
+  const livenessTimer = window.setInterval(() => {
+    if (!isExtensionContextAlive()) finish()
+  }, LIVENESS_POLL_MS)
 
   let stopped = false
   return function stop(): void {

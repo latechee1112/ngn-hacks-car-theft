@@ -125,9 +125,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'DISTILL_SIMPLIFY': {
       // Deliberately not awaited: the sweep is decoration running alongside
       // the analysis call, never in front of it. stop() must fire on every
-      // path — success or failure — or the overlay is stuck on the page
-      // until SAFETY_MAX_MS. Activate only — restoring the page does not
-      // replay it.
+      // path — success or failure — because the sweep now loops for as long as
+      // the analysis runs and has no time limit of its own to fall back on.
+      // Activate only — restoring the page does not replay it.
       const settings: SimplifySettings = { ...FALLBACK_SETTINGS, ...(message.settings ?? {}) }
       const stopScan = startScanAnimation()
       handleSimplify(settings)
